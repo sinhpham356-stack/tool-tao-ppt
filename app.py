@@ -165,7 +165,7 @@ if not st.session_state.template_bytes:
         st.info("🎨 THIẾT KẾ TRANG BÌA & ẢNH NỀN (Tùy chọn):")
         main_title = st.text_input("Tiêu đề chính (Sẽ tự động tạo Slide Bìa):", placeholder="VD: BÁO CÁO NGHIỆM THU SỰ KIỆN")
         sub_title = st.text_input("Tiêu đề phụ:", placeholder="VD: Ngày 16/08/2026 - Địa điểm: SECC")
-        bg_image_file = st.file_uploader("🖼️ Tải 1 ảnh làm HÌNH NỀN (Tự động kéo giãn tràn viền áp dụng cho mọi trang):", type=['jpg', 'jpeg', 'png', 'webp', 'heic'])
+        bg_image_file = st.file_uploader("🖼️ Tải 1 ảnh làm HÌNH NỀN (Chỉ áp dụng cho Bìa đầu và Bìa cuối):", type=['jpg', 'jpeg', 'png', 'webp', 'heic'])
 
 # --- XỬ LÝ XUẤT FILE ---
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
@@ -226,27 +226,27 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         bg_stream.seek(0)
                         title_slide.shapes.add_picture(bg_stream, 0, 0, width=slide_w, height=slide_h)
                     
-                    # Chèn Tiêu đề chính
+                    # Chèn Tiêu đề chính (Dời xuống dưới)
                     if main_title:
-                        txBox = title_slide.shapes.add_textbox(Inches(0.5), slide_h/2 - Inches(1.5), slide_w - Inches(1), Inches(1.5))
+                        txBox = title_slide.shapes.add_textbox(Inches(0.5), slide_h - Inches(2.2), slide_w - Inches(1), Inches(1))
                         tf = txBox.text_frame
                         tf.word_wrap = True
                         p = tf.paragraphs[0]
                         p.text = main_title.upper() # In hoa
                         p.alignment = PP_ALIGN.CENTER
-                        p.font.size = Pt(50)
+                        p.font.size = Pt(44)
                         p.font.bold = True
                         p.font.color.rgb = RGBColor(255, 255, 255) if bg_stream else RGBColor(0, 51, 102)
 
-                    # Chèn Tiêu đề phụ
+                    # Chèn Tiêu đề phụ (Dời xuống dưới)
                     if sub_title:
-                        txBox2 = title_slide.shapes.add_textbox(Inches(0.5), slide_h/2 + Inches(0.2), slide_w - Inches(1), Inches(1))
+                        txBox2 = title_slide.shapes.add_textbox(Inches(0.5), slide_h - Inches(1.2), slide_w - Inches(1), Inches(0.8))
                         tf2 = txBox2.text_frame
                         tf2.word_wrap = True
                         p2 = tf2.paragraphs[0]
                         p2.text = sub_title
                         p2.alignment = PP_ALIGN.CENTER
-                        p2.font.size = Pt(28)
+                        p2.font.size = Pt(24)
                         p2.font.color.rgb = RGBColor(240, 240, 240) if bg_stream else RGBColor(80, 80, 80)
                     
                     # Cập nhật lại vị trí chèn ảnh ngay sau trang bìa
@@ -284,17 +284,12 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
 
                 image_data.sort(key=lambda x: (x['timestamp'], x['name']))
 
-                # 5. DÀN TRANG NỘI DUNG CHÍNH
+                # 5. DÀN TRANG NỘI DUNG CHÍNH (Bỏ Background nền, để trắng)
                 if "Layout 1" in mode:
                     i = 0
                     while i < len(image_data):
                         current_img = image_data[i]
                         slide = prs.slides.add_slide(slide_layout) 
-                        
-                        # Chèn Background nếu có
-                        if use_blank and bg_stream:
-                            bg_stream.seek(0)
-                            slide.shapes.add_picture(bg_stream, 0, 0, width=slide_w, height=slide_h)
 
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
                         
@@ -352,11 +347,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         n = len(chunk)
 
                         slide = prs.slides.add_slide(slide_layout)
-                        
-                        # Chèn Background nếu có
-                        if use_blank and bg_stream:
-                            bg_stream.seek(0)
-                            slide.shapes.add_picture(bg_stream, 0, 0, width=slide_w, height=slide_h)
 
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
@@ -383,14 +373,14 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     
                     move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
-                    # Chữ Thank You
-                    txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), slide_h/2 - Inches(1), slide_w - Inches(1), Inches(2))
+                    # Chữ Thank You (Đã thu nhỏ & dời xuống dưới)
+                    txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), slide_h - Inches(2.2), slide_w - Inches(1), Inches(1))
                     tf_ty = txBox_ty.text_frame
                     tf_ty.word_wrap = True
                     p_ty = tf_ty.paragraphs[0]
                     p_ty.text = "THANK YOU!"
                     p_ty.alignment = PP_ALIGN.CENTER
-                    p_ty.font.size = Pt(65)
+                    p_ty.font.size = Pt(44) # Thu bé lại
                     p_ty.font.bold = True
                     p_ty.font.color.rgb = RGBColor(255, 255, 255) if bg_stream else RGBColor(0, 51, 102)
                     
