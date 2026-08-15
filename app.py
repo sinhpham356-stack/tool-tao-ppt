@@ -28,7 +28,6 @@ if "template_bytes" not in st.session_state: st.session_state.template_bytes = N
 if "cover_pos" not in st.session_state: st.session_state.cover_pos = "Dưới - Giữa"
 if "ty_pos" not in st.session_state: st.session_state.ty_pos = "Trung tâm"
 
-# Găm file vào bộ nhớ để không bị mất khi bấm Tải xuống
 if "final_pdf" not in st.session_state: st.session_state.final_pdf = None
 if "final_pptx" not in st.session_state: st.session_state.final_pptx = None
 if "show_download_pdf" not in st.session_state: st.session_state.show_download_pdf = False
@@ -106,7 +105,6 @@ def draw_adaptive_grid(slide, layout_rows, start_x_base, start_y_base, usable_w,
             current_x += img_w + GAP
         current_y += H_final + GAP
 
-# => ĐÂY LÀ HÀM BỊ LỠ TAY XÓA MẤT (ĐÃ THÊM LẠI)
 def partition_images(imgs, max_size):
     if not imgs: return []
     n = len(imgs)
@@ -122,17 +120,19 @@ def partition_images(imgs, max_size):
     return res
 
 # ------------------------------------------
-# HÀM VẼ PDF ĐỘC LẬP BẰNG PILLOW
+# HÀM VẼ PDF ĐỘC LẬP BẰNG PILLOW (BẢN NÂNG CẤP 4K - 300DPI)
 # ------------------------------------------
 def emu_to_px(emu):
-    return int((emu / 914400.0) * 120)
+    # PPTX dùng EMU (914400 EMU = 1 Inch). PDF hệ số 300 pixels/inch (Mịn gấp 3 lần bản cũ)
+    return int((emu / 914400.0) * 300)
 
 def add_pdf_slide(pdf_slides, bg_stream=None):
-    img = Image.new('RGB', (1600, 900), (255, 255, 255))
+    # Khung canvas 4K (4000x2250) tỷ lệ 16:9
+    img = Image.new('RGB', (4000, 2250), (255, 255, 255))
     if bg_stream:
         bg_stream.seek(0)
         bg = Image.open(bg_stream).convert('RGB')
-        bg = bg.resize((1600, 900), Image.LANCZOS)
+        bg = bg.resize((4000, 2250), Image.LANCZOS)
         img.paste(bg, (0, 0))
     pdf_slides.append(img)
     return img
@@ -140,7 +140,7 @@ def add_pdf_slide(pdf_slides, bg_stream=None):
 def draw_text_pdf(slide_img, text, x_emu, y_emu, w_emu, h_emu, align_pos, pt_size, color_hex, underline=False):
     draw = ImageDraw.Draw(slide_img)
     px, py, pw = emu_to_px(x_emu), emu_to_px(y_emu), emu_to_px(w_emu)
-    font_size = int(pt_size * 120 / 72)
+    font_size = int(pt_size * 300 / 72) # Quy đổi pt sang pixel ở độ phân giải 300DPI
     
     font_path = "Roboto-Medium.ttf"
     if not os.path.exists(font_path):
@@ -169,7 +169,8 @@ def draw_text_pdf(slide_img, text, x_emu, y_emu, w_emu, h_emu, align_pos, pt_siz
     for line in lines:
         bbox = draw.textbbox((0,0), line, font=font)
         tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
+        text_bottom = bbox[3] # Lấy chính xác điểm rơi thấp nhất của cụm chữ
+        th = text_bottom - bbox[1]
         
         if "Trái" in align_pos or align_pos == PP_ALIGN.LEFT: tx = px
         elif "Phải" in align_pos or align_pos == PP_ALIGN.RIGHT: tx = px + pw - tw
@@ -177,8 +178,10 @@ def draw_text_pdf(slide_img, text, x_emu, y_emu, w_emu, h_emu, align_pos, pt_siz
             
         draw.text((tx, current_y), line, font=font, fill=(r,g,b))
         if underline:
-            draw.line([tx, current_y + th + 5, tx + tw, current_y + th + 5], fill=(r,g,b), width=3)
-        current_y += th + 15
+            # Vẽ gạch chân dưới điểm thấp nhất 15 pixel, độ dày 6 pixel
+            line_y = current_y + text_bottom + 15
+            draw.line([tx, line_y, tx + tw, line_y], fill=(r,g,b), width=6)
+        current_y += th + 40 # Dãn dòng cho thoáng
 
 def add_image_pdf(slide_img, img_stream, left_emu, top_emu, width_emu, height_emu):
     img_stream.seek(0)
@@ -188,7 +191,7 @@ def add_image_pdf(slide_img, img_stream, left_emu, top_emu, width_emu, height_em
     img = img.resize((pw, ph), Image.LANCZOS)
     slide_img.paste(img, (px, py))
     draw = ImageDraw.Draw(slide_img)
-    draw.rectangle([px, py, px+pw, py+ph], outline=(30,30,30), width=4)
+    draw.rectangle([px, py, px+pw, py+ph], outline=(30,30,30), width=6)
 
 def draw_adaptive_grid_pdf(slide_img, layout_rows, start_x_base, start_y_base, usable_w, usable_h, GAP):
     num_rows = len(layout_rows)
