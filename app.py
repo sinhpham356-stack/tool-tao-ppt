@@ -15,13 +15,18 @@ try:
 except ImportError:
     pass
 
-# ==========================================
-# CẤU HÌNH GIAO DIỆN WEB
-# ==========================================
 st.set_page_config(page_title="Công Cụ Chèn Ảnh PowerPoint", page_icon="⚡", layout="centered")
 
 # ==========================================
-# HÀM LÕI XỬ LÝ PPTX TRÊN WEB
+# KHỞI TẠO BỘ NHỚ TẠM (GIỎ HÀNG LÁCH LUẬT iOS)
+# ==========================================
+if "photo_cart" not in st.session_state:
+    st.session_state.photo_cart = {} # Chứa ảnh cộng dồn
+if "template_bytes" not in st.session_state:
+    st.session_state.template_bytes = None # Nhớ file mẫu
+
+# ==========================================
+# HÀM LÕI XỬ LÝ PPTX
 # ==========================================
 def add_image_exact(slide, img_stream, left, top, width, height):
     with Image.open(img_stream) as img:
@@ -49,7 +54,6 @@ def draw_adaptive_grid(slide, layout_rows, start_x_base, start_y_base, usable_w,
     if num_rows == 0: return
 
     H_max = (usable_h - (num_rows - 1) * GAP) / num_rows
-
     H_final = H_max
     for row in layout_rows:
         if not row: continue
@@ -90,42 +94,44 @@ def partition_images(imgs, max_size):
 # GIAO DIỆN HIỂN THỊ
 # ==========================================
 st.title("⚡ TRỢ LÝ TẠO REPORT BẰNG HÌNH ẢNH")
-st.markdown("Chèn ảnh tự động, giữ đúng thời gian chụp, tràn viền chuẩn form.")
+st.error("🍎 **CÔNG NGHỆ CHỐNG VĂNG ẢNH TRÊN IPHONE:** Tải lên từng đợt nhỏ (2-5 ảnh), hệ thống sẽ tự động GOM VÀO GIỎ HÀNG cho đến khi đủ ảnh thì thôi!")
 
+# --- BƯỚC 1 ---
 st.header("Bước 1: Tải lên File PowerPoint Mẫu")
-template_file = st.file_uploader("Chọn file .pptx", type=["pptx"])
+template_file = st.file_uploader("Chọn file .pptx (Chỉ cần up 1 lần)", type=["pptx"])
+if template_file:
+    st.session_state.template_bytes = template_file.getvalue()
 
-st.header("Bước 2: Chọn Ảnh (Từ Thư Viện Hoặc Chụp Camera)")
+if st.session_state.template_bytes:
+    st.success("✅ Đã lưu file PPTX mẫu vào bộ nhớ!")
 
-# ĐÃ SỬA: Cung cấp rõ danh sách đuôi file để iOS và Chrome không bị lỗi ngầm
-uploaded_images = st.file_uploader(
-    "📁 Chọn nhiều ảnh từ Thư viện máy", 
-    type=['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'],
-    accept_multiple_files=True
-)
+# --- BƯỚC 2 ---
+st.header("Bước 2: Ném ảnh vào Giỏ (Có thể ném nhiều lần)")
 
-st.markdown("---")
-st.markdown("📷 **Hoặc chụp ảnh trực tiếp bằng Camera (nếu cần):**")
-camera_photo = st.camera_input("Bấm để chụp ảnh thực tế")
-
-all_images_to_process = []
-
+uploaded_images = st.file_uploader("📂 Nhấn để chọn vài tấm ảnh từ máy", accept_multiple_files=True)
 if uploaded_images:
-    all_images_to_process.extend(uploaded_images)
+    count = 0
+    for f in uploaded_images:
+        if f.name not in st.session_state.photo_cart:
+            st.session_state.photo_cart[f.name] = {"bytes": f.getvalue(), "name": f.name}
+            count += 1
+    if count > 0:
+        st.success(f"🎉 Vừa nhặt thành công {count} ảnh vào giỏ!")
 
+camera_photo = st.camera_input("📷 Hoặc chụp ảnh thực tế tại hiện trường")
 if camera_photo:
-    if "captured_photos" not in st.session_state:
-        st.session_state.captured_photos = []
-    if not st.session_state.captured_photos or st.session_state.captured_photos[-1].name != camera_photo.name:
-        st.session_state.captured_photos.append(camera_photo)
-    
-    st.info(f"Đang có {len(st.session_state.captured_photos)} ảnh chụp từ camera.")
-    if st.button("🗑️ Xóa danh sách ảnh chụp"):
-        st.session_state.captured_photos = []
-        st.rerun()
-        
-    all_images_to_process.extend(st.session_state.captured_photos)
+    cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
+    st.session_state.photo_cart[cam_name] = {"bytes": camera_photo.getvalue(), "name": cam_name}
+    st.success("📸 Đã ném ảnh vừa chụp vào giỏ!")
 
+# KHU VỰC HIỂN THỊ GIỎ HÀNG
+if st.session_state.photo_cart:
+    st.info(f"🛒 **TRONG GIỎ ĐANG CÓ: {len(st.session_state.photo_cart)} ẢNH** ĐÃ SẴN SÀNG.")
+    if st.button("🗑️ Làm trống Giỏ hàng để chọn lại từ đầu"):
+        st.session_state.photo_cart = {}
+        st.rerun()
+
+# --- BƯỚC 3 ---
 st.header("Bước 3: Tùy Chỉnh Layout")
 mode = st.radio("Chọn chế độ:", 
                 ("Layout 1: Cơ bản (1-2 ảnh/trang)", 
@@ -136,18 +142,20 @@ if "Layout 1" in mode:
     align_mode = st.radio("Căn lề cho ảnh (Layout 1):", ("1 - Trái", "2 - Giữa", "3 - Phải"))
     align_mode = align_mode[0]
 
+# --- BƯỚC 4 ---
 st.header("Bước 4: Vị trí chèn")
 vitri_input = st.text_input("Chèn vào sau Slide số mấy? (Gõ 0 để chèn cuối cùng):", "0")
 
+# --- XỬ LÝ XUẤT FILE ---
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
-    if not template_file:
-        st.error("⚠️ Vui lòng tải lên file PowerPoint mẫu ở Bước 1!")
-    elif not all_images_to_process:
-        st.error("⚠️ Vui lòng chọn hoặc chụp ít nhất 1 tấm ảnh ở Bước 2!")
+    if not st.session_state.template_bytes:
+        st.error("⚠️ Bác quên tải file PowerPoint mẫu ở Bước 1 rồi!")
+    elif not st.session_state.photo_cart:
+        st.error("⚠️ Giỏ ảnh đang trống trơn! Bác chọn thêm ảnh ở Bước 2 nhé!")
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
-                prs = Presentation(template_file)
+                prs = Presentation(io.BytesIO(st.session_state.template_bytes))
                 tong_slide = len(prs.slides)
                 
                 vi_tri_hien_tai = tong_slide 
@@ -175,10 +183,8 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 usable_h = slide_h - CACH_LE_TREN - CACH_LE_DUOI
 
                 image_data = []
-                for img_file in all_images_to_process:
-                    img_bytes = img_file.read()
-                    img_stream = io.BytesIO(img_bytes)
-                    
+                for key, img_info in st.session_state.photo_cart.items():
+                    img_stream = io.BytesIO(img_info["bytes"])
                     try:
                         with Image.open(img_stream) as im:
                             im = ImageOps.exif_transpose(im)
@@ -197,7 +203,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                             'is_portrait': is_portrait, 
                             'w': width, 
                             'h': height,
-                            'name': getattr(img_file, 'name', 'photo.jpg'),
+                            'name': img_info["name"],
                             'timestamp': str(dt_str)
                         })
                     except Exception:
@@ -304,9 +310,9 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 prs.save(output_stream)
                 output_stream.seek(0)
                 
-                st.success("✅ Thành công! Hãy bấm nút bên dưới để tải File về máy.")
+                st.success("✅ Thành công mỹ mãn! Bấm tải File xuống ngay thôi.")
                 st.download_button(
-                    label="📥 BẤM VÀO ĐÂY ĐỂ TẢI FILE POWERPOINT XUỐNG",
+                    label="📥 TẢI FILE POWERPOINT XUỐNG",
                     data=output_stream,
                     file_name="Report_Auto_Exported.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
