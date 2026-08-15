@@ -112,7 +112,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
-                # Đọc template từ file tải lên Web
                 prs = Presentation(template_file)
                 tong_slide = len(prs.slides)
                 
@@ -151,12 +150,11 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                             width, height = im.size
                             is_portrait = height >= width
                             
-                            dt_str = "9999" # Mặc định nếu mất Exif trên Web thì xếp sau
+                            dt_str = "9999"
                             exif = im.getexif()
                             if exif:
                                 dt_str = exif.get(36867) or exif.get(306) or "9999"
 
-                        # Reset stream sau khi đọc xong
                         img_stream.seek(0)
                         
                         image_data.append({
@@ -170,7 +168,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     except Exception:
                         pass
 
-                # Sort theo Exif -> Tên
                 image_data.sort(key=lambda x: (x['timestamp'], x['name']))
 
                 if "Layout 1" in mode:
@@ -268,7 +265,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         draw_adaptive_grid(slide, layout_rows, start_x_base, start_y_base, usable_w, usable_h, GAP)
                         vi_tri_hien_tai += 1
 
-                # Xuất ra web để tải về
                 output_stream = io.BytesIO()
                 prs.save(output_stream)
                 output_stream.seek(0)
