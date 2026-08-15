@@ -111,16 +111,13 @@ def partition_images(imgs, max_size):
 
 # ----------------- 9 ĐIỂM NEO (ANCHORS) -----------------
 def render_position_grid(state_key, key_prefix):
-    """Vẽ sa bàn 3x3 để chọn vị trí chữ trực quan"""
     def set_pos(pos): st.session_state[state_key] = pos
     current_pos = st.session_state[state_key]
-    
     grid_config = [
         [("Trên - Trái", "↖️"), ("Trên - Giữa", "⬆️"), ("Trên - Phải", "↗️")],
         [("Giữa - Trái", "⬅️"), ("Trung tâm", "⏺️"), ("Giữa - Phải", "➡️")],
         [("Dưới - Trái", "↙️"), ("Dưới - Giữa", "⬇️"), ("Dưới - Phải", "↘️")]
     ]
-    
     st.markdown(f"📍 Đang định vị: **{current_pos}**")
     for r_idx, row in enumerate(grid_config):
         cols = st.columns(3, gap="small")
@@ -205,7 +202,7 @@ use_blank = False
 main_title, sub_title, cover_color = "", "", "#FFFFFF"
 content_title, content_color = "", "#003366"
 thankyou_color = "#FFFFFF"
-bg_cover_file, bg_end_file = None, None
+bg_cover_file, bg_content_file, bg_end_file = None, None, None
 
 if not st.session_state.template_bytes:
     st.warning("⚠️ Bạn chưa tải file PowerPoint mẫu (ở Bước 1).")
@@ -223,6 +220,7 @@ if not st.session_state.template_bytes:
             with col_color1: cover_color = st.color_picker("🎨 Màu chữ bìa:", "#FFFFFF", key="c_col")
 
         with st.expander("2️⃣ TRANG NỘI DUNG (Các trang chứa ảnh)"):
+            bg_content_file = st.file_uploader("🖼️ Tải Ảnh Nền chung cho các trang giữa:", type=['jpg', 'jpeg', 'png'], key="content_bg")
             content_title = st.text_input("Ghi chú góc trên trái (Sẽ tự động gạch chân):", placeholder="VD: HÌNH ẢNH THI CÔNG THỰC TẾ")
             content_color = st.color_picker("🎨 Màu chữ ghi chú:", "#003366", key="con_col")
 
@@ -241,7 +239,9 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
+                # Chế biến sẵn 3 luồng ảnh nền (nếu có)
                 bg_cover_stream = process_bg_image(bg_cover_file) if use_blank else None
+                bg_content_stream = process_bg_image(bg_content_file) if use_blank else None
                 bg_end_stream = process_bg_image(bg_end_file) if use_blank else None
                 
                 r_cov, g_cov, b_cov = hex_to_rgb(cover_color)
@@ -284,7 +284,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     align_cover = get_alignment(st.session_state.cover_pos)
 
                     if main_title:
-                        # Rộng hết cỡ, căn theo lề định sẵn để tự rớt dòng
                         txBox = title_slide.shapes.add_textbox(Inches(0.5), y_main, slide_w - Inches(1), Inches(1))
                         tf = txBox.text_frame
                         tf.word_wrap = True
@@ -345,7 +344,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         p_c.text = content_title.upper()
                         p_c.font.size = Pt(22)
                         p_c.font.bold = True
-                        p_c.font.underline = True # Tự động Gạch chân
+                        p_c.font.underline = True 
                         p_c.font.color.rgb = RGBColor(r_con, g_con, b_con)
 
                 # ==========================
@@ -356,6 +355,12 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     while i < len(image_data):
                         current_img = image_data[i]
                         slide = prs.slides.add_slide(slide_layout) 
+                        
+                        # CHÈN ẢNH NỀN CHO TRANG GIỮA NẾU CÓ
+                        if use_blank and bg_content_stream:
+                            bg_content_stream.seek(0)
+                            slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
+                            
                         add_content_title(slide) 
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
                         
@@ -406,6 +411,12 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         chunk = chunk_dict['images']
                         n = len(chunk)
                         slide = prs.slides.add_slide(slide_layout)
+                        
+                        # CHÈN ẢNH NỀN CHO TRANG GIỮA NẾU CÓ
+                        if use_blank and bg_content_stream:
+                            bg_content_stream.seek(0)
+                            slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
+                            
                         add_content_title(slide) 
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
