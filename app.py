@@ -21,30 +21,25 @@ st.set_page_config(page_title="Công Cụ Chèn Ảnh PowerPoint", page_icon="�
 # ==========================================
 # KHỞI TẠO BỘ NHỚ TẠM
 # ==========================================
-if "photo_cart" not in st.session_state:
-    st.session_state.photo_cart = {} 
-if "template_bytes" not in st.session_state:
-    st.session_state.template_bytes = None 
+if "photo_cart" not in st.session_state: st.session_state.photo_cart = {} 
+if "template_bytes" not in st.session_state: st.session_state.template_bytes = None 
+if "cover_pos" not in st.session_state: st.session_state.cover_pos = "Dưới - Giữa"
+if "ty_pos" not in st.session_state: st.session_state.ty_pos = "Trung tâm"
 
 # ==========================================
 # HÀM LÕI XỬ LÝ
 # ==========================================
 def hex_to_rgb(hex_color):
-    """Chuyển đổi mã màu Hex (VD: #FFFFFF) sang RGB"""
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
 def process_bg_image(uploaded_file, target_ratio=16/9):
-    """Xử lý cắt crop ảnh nền chống méo theo chuẩn 16:9"""
-    if not uploaded_file:
-        return None
+    if not uploaded_file: return None
     try:
         bg_bytes = uploaded_file.getvalue()
         with Image.open(io.BytesIO(bg_bytes)) as img:
             img = ImageOps.exif_transpose(img)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            
+            if img.mode != 'RGB': img = img.convert('RGB')
             img_ratio = img.width / img.height
             if img_ratio > target_ratio:
                 new_w = int(img.height * target_ratio)
@@ -54,18 +49,15 @@ def process_bg_image(uploaded_file, target_ratio=16/9):
                 new_h = int(img.width / target_ratio)
                 offset = (img.height - new_h) // 2
                 img = img.crop((0, offset, img.width, offset + new_h))
-
             bg_stream = io.BytesIO()
             img.save(bg_stream, format='JPEG', quality=95)
             return bg_stream
-    except Exception:
-        return None
+    except Exception: return None
 
 def add_image_exact(slide, img_stream, left, top, width, height):
     with Image.open(img_stream) as img:
         img = ImageOps.exif_transpose(img) 
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
+        if img.mode != 'RGB': img = img.convert('RGB')
         temp_stream = io.BytesIO()
         img.save(temp_stream, format='JPEG', quality=95)
         temp_stream.seek(0)
@@ -84,24 +76,19 @@ def move_slide(prs, old_index, new_index):
 def draw_adaptive_grid(slide, layout_rows, start_x_base, start_y_base, usable_w, usable_h, GAP):
     num_rows = len(layout_rows)
     if num_rows == 0: return
-
     H_max = (usable_h - (num_rows - 1) * GAP) / num_rows
     H_final = H_max
     for row in layout_rows:
         if not row: continue
         sum_ratios = sum(img['w'] / img['h'] for img in row)
         H_row_max = (usable_w - (len(row) - 1) * GAP) / sum_ratios
-        if H_row_max < H_final:
-            H_final = H_row_max
-
+        if H_row_max < H_final: H_final = H_row_max
     Total_H = num_rows * H_final + (num_rows - 1) * GAP
     current_y = start_y_base + (usable_h - Total_H) / 2
-
     for row in layout_rows:
         if not row: continue
         row_w = sum(H_final * (img['w'] / img['h']) for img in row) + (len(row) - 1) * GAP
         current_x = start_x_base + (usable_w - row_w) / 2
-
         for img in row:
             img_w = H_final * (img['w'] / img['h'])
             add_image_exact(slide, img['stream'], current_x, current_y, img_w, H_final)
@@ -122,19 +109,37 @@ def partition_images(imgs, max_size):
         idx += s
     return res
 
-# ----------------- HÀM XỬ LÝ 9 VỊ TRÍ -----------------
+# ----------------- 9 ĐIỂM NEO (ANCHORS) -----------------
+def render_position_grid(state_key, key_prefix):
+    """Vẽ sa bàn 3x3 để chọn vị trí chữ trực quan"""
+    def set_pos(pos): st.session_state[state_key] = pos
+    current_pos = st.session_state[state_key]
+    
+    grid_config = [
+        [("Trên - Trái", "↖️"), ("Trên - Giữa", "⬆️"), ("Trên - Phải", "↗️")],
+        [("Giữa - Trái", "⬅️"), ("Trung tâm", "⏺️"), ("Giữa - Phải", "➡️")],
+        [("Dưới - Trái", "↙️"), ("Dưới - Giữa", "⬇️"), ("Dưới - Phải", "↘️")]
+    ]
+    
+    st.markdown(f"📍 Đang định vị: **{current_pos}**")
+    for r_idx, row in enumerate(grid_config):
+        cols = st.columns(3, gap="small")
+        for c_idx, (pos_name, icon) in enumerate(row):
+            btn_label = f"✅ {icon}" if current_pos == pos_name else icon
+            cols[c_idx].button(
+                btn_label, key=f"{key_prefix}_{r_idx}_{c_idx}", 
+                use_container_width=True, on_click=set_pos, args=(pos_name,)
+            )
+
 def get_alignment(pos_str):
     if "Trái" in pos_str: return PP_ALIGN.LEFT
     elif "Phải" in pos_str: return PP_ALIGN.RIGHT
     else: return PP_ALIGN.CENTER
 
 def get_cover_y(pos_str, slide_h, is_sub=False):
-    if "Trên" in pos_str:
-        return Inches(0.5) if not is_sub else Inches(1.5)
-    elif "Dưới" in pos_str:
-        return slide_h - Inches(2.2) if not is_sub else slide_h - Inches(1.2)
-    else: # Giữa
-        return slide_h/2 - Inches(1.0) if not is_sub else slide_h/2 + Inches(0.2)
+    if "Trên" in pos_str: return Inches(0.5) if not is_sub else Inches(1.5)
+    elif "Dưới" in pos_str: return slide_h - Inches(2.2) if not is_sub else slide_h - Inches(1.2)
+    else: return slide_h/2 - Inches(1.0) if not is_sub else slide_h/2 + Inches(0.2)
 
 def get_ty_y(pos_str, slide_h):
     if "Trên" in pos_str: return Inches(0.8)
@@ -148,19 +153,15 @@ def get_ty_y(pos_str, slide_h):
 st.title("⚡ TRỢ LÝ TẠO REPORT BẰNG HÌNH ẢNH")
 st.error("🍎 **CHỐNG VĂNG ẢNH IPHONE:** Tải lên từng đợt nhỏ (2-5 ảnh), hệ thống tự gom vào Giỏ Hàng!")
 
-# --- BƯỚC 1 ---
 st.header("Bước 1: Tải lên File PowerPoint Mẫu (Không bắt buộc)")
 template_file = st.file_uploader("Chọn file .pptx (Chỉ cần up 1 lần)", type=["pptx"])
-if template_file:
-    st.session_state.template_bytes = template_file.getvalue()
-
+if template_file: st.session_state.template_bytes = template_file.getvalue()
 if st.session_state.template_bytes:
     st.success("✅ Đã lưu file PPTX mẫu vào bộ nhớ!")
     if st.button("🗑️ Xóa file mẫu (Để tạo file trắng mới)"):
         st.session_state.template_bytes = None
         st.rerun()
 
-# --- BƯỚC 2 ---
 st.header("Bước 2: Ném ảnh vào Giỏ")
 uploaded_images = st.file_uploader("📂 Nhấn để chọn ảnh từ máy", accept_multiple_files=True)
 if uploaded_images:
@@ -177,8 +178,7 @@ if camera_photo:
     is_duplicate = False
     for item in st.session_state.photo_cart.values():
         if item["bytes"] == cam_bytes:
-            is_duplicate = True
-            break
+            is_duplicate = True; break
     if not is_duplicate:
         cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
         st.session_state.photo_cart[cam_name] = {"bytes": cam_bytes, "name": cam_name}
@@ -190,7 +190,6 @@ if st.session_state.photo_cart:
         st.session_state.photo_cart = {}
         st.rerun()
 
-# --- BƯỚC 3 ---
 st.header("Bước 3: Tùy Chỉnh Layout")
 mode = st.radio("Chọn chế độ:", ("Layout 1: Cơ bản (1-2 ảnh/trang)", "Layout 2: Tràn viền (Lưới tự động chia đều, nhiều ảnh)"))
 align_mode = "2"
@@ -198,22 +197,14 @@ if "Layout 1" in mode:
     align_mode = st.radio("Căn lề cho ảnh (Layout 1):", ("1 - Trái", "2 - Giữa", "3 - Phải"))
     align_mode = align_mode[0]
 
-# --- BƯỚC 4 ---
 st.header("Bước 4: Vị trí chèn & Thiết kế")
 vitri_input = st.text_input("Chèn vào sau Slide số mấy? (Gõ 0 để chèn cuối cùng):", "0")
 
 st.markdown("---")
-# TÍNH NĂNG MỚI: CUSTOM 9 VỊ TRÍ, GẠCH CHÂN TIÊU ĐỀ
 use_blank = False
-pos_options = [
-    "Trên - Trái", "Trên - Giữa", "Trên - Phải",
-    "Giữa - Trái", "Trung tâm", "Giữa - Phải",
-    "Dưới - Trái", "Dưới - Giữa", "Dưới - Phải"
-]
-
-main_title, sub_title, cover_pos, cover_color = "", "", "Dưới - Giữa", "#FFFFFF"
+main_title, sub_title, cover_color = "", "", "#FFFFFF"
 content_title, content_color = "", "#003366"
-thankyou_pos, thankyou_color = "Trung tâm", "#FFFFFF"
+thankyou_color = "#FFFFFF"
 bg_cover_file, bg_end_file = None, None
 
 if not st.session_state.template_bytes:
@@ -227,19 +218,19 @@ if not st.session_state.template_bytes:
             bg_cover_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Mở Đầu:", type=['jpg', 'jpeg', 'png'], key="cover")
             main_title = st.text_input("Tiêu đề chính:", placeholder="VD: BÁO CÁO NGHIỆM THU")
             sub_title = st.text_input("Tiêu đề phụ:", placeholder="VD: Ngày 16/08/2026")
-            col1, col2 = st.columns(2)
-            with col1: cover_pos = st.selectbox("Chọn 9 vị trí chữ:", pos_options, index=7, key="c_pos")
-            with col2: cover_color = st.color_picker("Màu chữ:", "#FFFFFF", key="c_col")
+            col_grid1, col_color1 = st.columns([2, 1])
+            with col_grid1: render_position_grid("cover_pos", "cv")
+            with col_color1: cover_color = st.color_picker("🎨 Màu chữ bìa:", "#FFFFFF", key="c_col")
 
         with st.expander("2️⃣ TRANG NỘI DUNG (Các trang chứa ảnh)"):
             content_title = st.text_input("Ghi chú góc trên trái (Sẽ tự động gạch chân):", placeholder="VD: HÌNH ẢNH THI CÔNG THỰC TẾ")
-            content_color = st.color_picker("Màu chữ ghi chú:", "#003366", key="con_col")
+            content_color = st.color_picker("🎨 Màu chữ ghi chú:", "#003366", key="con_col")
 
         with st.expander("3️⃣ TRANG KẾT THÚC (Thank You)"):
             bg_end_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Kết Thúc:", type=['jpg', 'jpeg', 'png'], key="end")
-            col3, col4 = st.columns(2)
-            with col3: thankyou_pos = st.selectbox("Chọn 9 vị trí chữ:", pos_options, index=4, key="t_pos")
-            with col4: thankyou_color = st.color_picker("Màu chữ:", "#FFFFFF", key="t_col")
+            col_grid2, col_color2 = st.columns([2, 1])
+            with col_grid2: render_position_grid("ty_pos", "ty")
+            with col_color2: thankyou_color = st.color_picker("🎨 Màu chữ Thank You:", "#FFFFFF", key="t_col")
 
 # --- XỬ LÝ XUẤT FILE ---
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
@@ -269,14 +260,12 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 
                 tong_slide = len(prs.slides)
                 vi_tri_hien_tai = tong_slide 
-                
                 if tong_slide > 0:
                     match = re.search(r'\d+', vitri_input)
                     if match:
                         trang_chon = int(match.group())
                         if 0 < trang_chon <= tong_slide: vi_tri_hien_tai = trang_chon
-                else:
-                    vi_tri_hien_tai = 0
+                else: vi_tri_hien_tai = 0
 
                 try: slide_layout = prs.slide_layouts[6]
                 except: slide_layout = prs.slide_layouts[0] 
@@ -290,12 +279,12 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         bg_cover_stream.seek(0)
                         title_slide.shapes.add_picture(bg_cover_stream, 0, 0, width=slide_w, height=slide_h)
                     
-                    y_main = get_cover_y(cover_pos, slide_h, is_sub=False)
-                    y_sub = get_cover_y(cover_pos, slide_h, is_sub=True)
-                    align_cover = get_alignment(cover_pos)
+                    y_main = get_cover_y(st.session_state.cover_pos, slide_h, is_sub=False)
+                    y_sub = get_cover_y(st.session_state.cover_pos, slide_h, is_sub=True)
+                    align_cover = get_alignment(st.session_state.cover_pos)
 
                     if main_title:
-                        # Kéo textbox rộng từ mép trái sang mép phải, để text tự rớt dòng bám theo alignment
+                        # Rộng hết cỡ, căn theo lề định sẵn để tự rớt dòng
                         txBox = title_slide.shapes.add_textbox(Inches(0.5), y_main, slide_w - Inches(1), Inches(1))
                         tf = txBox.text_frame
                         tf.word_wrap = True
@@ -323,11 +312,10 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 CACH_LE_TRAI = Inches(0.2) 
                 CACH_LE_PHAI = Inches(0.2) 
                 GAP = Inches(0.12)          
-                
                 usable_w = slide_w - CACH_LE_TRAI - CACH_LE_PHAI
                 usable_h = slide_h - CACH_LE_TREN - CACH_LE_DUOI
 
-                # Lọc và sắp xếp ảnh trong giỏ
+                # Lọc và sắp xếp ảnh
                 image_data = []
                 for key, img_info in st.session_state.photo_cart.items():
                     img_stream = io.BytesIO(img_info["bytes"])
@@ -345,8 +333,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                             'stream': img_stream, 'is_portrait': is_portrait, 
                             'w': width, 'h': height, 'name': img_info["name"], 'timestamp': str(dt_str)
                         })
-                    except Exception:
-                        pass
+                    except Exception: pass
                 image_data.sort(key=lambda x: (x['timestamp'], x['name']))
 
                 # Hàm chèn Tiêu đề Nội dung có GẠCH CHÂN
@@ -358,7 +345,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         p_c.text = content_title.upper()
                         p_c.font.size = Pt(22)
                         p_c.font.bold = True
-                        p_c.font.underline = True # Thêm dòng kẻ dưới chữ
+                        p_c.font.underline = True # Tự động Gạch chân
                         p_c.font.color.rgb = RGBColor(r_con, g_con, b_con)
 
                 # ==========================
@@ -370,7 +357,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         current_img = image_data[i]
                         slide = prs.slides.add_slide(slide_layout) 
                         add_content_title(slide) 
-
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
                         
                         if current_img['is_portrait'] and (i + 1 < len(image_data)) and image_data[i+1]['is_portrait']:
@@ -396,11 +382,9 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         else:
                             r_img = current_img['w'] / current_img['h']
                             if usable_h * r_img <= usable_w:
-                                f_h = usable_h
-                                f_w = usable_h * r_img
+                                f_h = usable_h; f_w = usable_h * r_img
                             else:
-                                f_w = usable_w
-                                f_h = usable_w / r_img
+                                f_w = usable_w; f_h = usable_w / r_img
                                 
                             if align_mode == '1': s_x = CACH_LE_TRAI
                             elif align_mode == '3': s_x = slide_w - CACH_LE_PHAI - f_w
@@ -414,7 +398,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 elif "Layout 2" in mode:
                     landscapes = [img for img in image_data if not img['is_portrait']]
                     portraits = [img for img in image_data if img['is_portrait']]
-
                     smart_chunks = []
                     for c in partition_images(landscapes, 6): smart_chunks.append({'type': 'landscape', 'images': c})
                     for c in partition_images(portraits, 4): smart_chunks.append({'type': 'portrait', 'images': c})
@@ -422,17 +405,14 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     for chunk_dict in smart_chunks:
                         chunk = chunk_dict['images']
                         n = len(chunk)
-
                         slide = prs.slides.add_slide(slide_layout)
                         add_content_title(slide) 
-
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
                         layout_rows = []
-                        if chunk_dict['type'] == 'portrait':
-                            layout_rows = [chunk] 
+                        if chunk_dict['type'] == 'portrait': layout_rows = [chunk] 
                         else:
-                            if n == 6:   layout_rows = [chunk[0:3], chunk[3:6]]
+                            if n == 6: layout_rows = [chunk[0:3], chunk[3:6]]
                             elif n == 5: layout_rows = [chunk[0:3], chunk[3:5]]
                             elif n == 4: layout_rows = [chunk[0:2], chunk[2:4]]
                             else: layout_rows = [chunk]
@@ -448,11 +428,10 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     if bg_end_stream:
                         bg_end_stream.seek(0)
                         ty_slide.shapes.add_picture(bg_end_stream, 0, 0, width=slide_w, height=slide_h)
-                    
                     move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
-                    y_ty = get_ty_y(thankyou_pos, slide_h)
-                    align_ty = get_alignment(thankyou_pos)
+                    y_ty = get_ty_y(st.session_state.ty_pos, slide_h)
+                    align_ty = get_alignment(st.session_state.ty_pos)
 
                     txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), y_ty, slide_w - Inches(1), Inches(1))
                     tf_ty = txBox_ty.text_frame
