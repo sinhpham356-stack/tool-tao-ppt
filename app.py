@@ -201,7 +201,7 @@ st.markdown("---")
 use_blank = False
 main_title, sub_title, cover_color = "", "", "#FFFFFF"
 content_title, content_color = "", "#003366"
-thankyou_color = "#FFFFFF"
+end_title, thankyou_color = "THANK YOU!", "#FFFFFF"
 bg_cover_file, bg_content_file, bg_end_file = None, None, None
 
 if not st.session_state.template_bytes:
@@ -226,9 +226,11 @@ if not st.session_state.template_bytes:
 
         with st.expander("3️⃣ TRANG KẾT THÚC (Thank You)"):
             bg_end_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Kết Thúc:", type=['jpg', 'jpeg', 'png'], key="end")
+            # TÍNH NĂNG MỚI: TÙY CHỈNH CHỮ KẾT THÚC
+            end_title = st.text_input("Ghi chú kết thúc (Xóa trống nếu không muốn hiện chữ):", value="THANK YOU!")
             col_grid2, col_color2 = st.columns([2, 1])
             with col_grid2: render_position_grid("ty_pos", "ty")
-            with col_color2: thankyou_color = st.color_picker("🎨 Màu chữ Thank You:", "#FFFFFF", key="t_col")
+            with col_color2: thankyou_color = st.color_picker("🎨 Màu chữ Kết thúc:", "#FFFFFF", key="t_col")
 
 # --- XỬ LÝ XUẤT FILE ---
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
@@ -239,7 +241,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
-                # Chế biến sẵn 3 luồng ảnh nền (nếu có)
                 bg_cover_stream = process_bg_image(bg_cover_file) if use_blank else None
                 bg_content_stream = process_bg_image(bg_content_file) if use_blank else None
                 bg_end_stream = process_bg_image(bg_end_file) if use_blank else None
@@ -356,7 +357,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         current_img = image_data[i]
                         slide = prs.slides.add_slide(slide_layout) 
                         
-                        # CHÈN ẢNH NỀN CHO TRANG GIỮA NẾU CÓ
                         if use_blank and bg_content_stream:
                             bg_content_stream.seek(0)
                             slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
@@ -412,7 +412,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         n = len(chunk)
                         slide = prs.slides.add_slide(slide_layout)
                         
-                        # CHÈN ẢNH NỀN CHO TRANG GIỮA NẾU CÓ
                         if use_blank and bg_content_stream:
                             bg_content_stream.seek(0)
                             slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
@@ -434,25 +433,27 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 # ==========================
                 # TẠO TRANG KẾT THÚC
                 # ==========================
-                if use_blank:
+                if use_blank and (end_title.strip() or bg_end_stream):
                     ty_slide = prs.slides.add_slide(slide_layout)
                     if bg_end_stream:
                         bg_end_stream.seek(0)
                         ty_slide.shapes.add_picture(bg_end_stream, 0, 0, width=slide_w, height=slide_h)
                     move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
-                    y_ty = get_ty_y(st.session_state.ty_pos, slide_h)
-                    align_ty = get_alignment(st.session_state.ty_pos)
+                    # CHỈ TẠO CHỮ NẾU NGƯỜI DÙNG CÓ GÕ TEXT
+                    if end_title.strip():
+                        y_ty = get_ty_y(st.session_state.ty_pos, slide_h)
+                        align_ty = get_alignment(st.session_state.ty_pos)
 
-                    txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), y_ty, slide_w - Inches(1), Inches(1))
-                    tf_ty = txBox_ty.text_frame
-                    tf_ty.word_wrap = True
-                    p_ty = tf_ty.paragraphs[0]
-                    p_ty.text = "THANK YOU!"
-                    p_ty.alignment = align_ty
-                    p_ty.font.size = Pt(50) 
-                    p_ty.font.bold = True
-                    p_ty.font.color.rgb = RGBColor(r_ty, g_ty, b_ty)
+                        txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), y_ty, slide_w - Inches(1), Inches(1))
+                        tf_ty = txBox_ty.text_frame
+                        tf_ty.word_wrap = True
+                        p_ty = tf_ty.paragraphs[0]
+                        p_ty.text = end_title.upper()
+                        p_ty.alignment = align_ty
+                        p_ty.font.size = Pt(50) 
+                        p_ty.font.bold = True
+                        p_ty.font.color.rgb = RGBColor(r_ty, g_ty, b_ty)
 
                 output_stream = io.BytesIO()
                 prs.save(output_stream)
