@@ -97,9 +97,10 @@ template_file = st.file_uploader("Chọn file .pptx", type=["pptx"])
 
 st.header("Bước 2: Chọn Ảnh (Từ Thư Viện Hoặc Chụp Camera)")
 
-# ĐÃ SỬA: Loại bỏ tham số 'type' để trình duyệt điện thoại không bị lỗi chặn file
+# ĐÃ SỬA: Cung cấp rõ danh sách đuôi file để iOS và Chrome không bị lỗi ngầm
 uploaded_images = st.file_uploader(
-    "📁 Chọn hoặc bôi đen nhiều ảnh từ Thư viện máy", 
+    "📁 Chọn nhiều ảnh từ Thư viện máy", 
+    type=['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'],
     accept_multiple_files=True
 )
 
