@@ -122,6 +122,26 @@ def partition_images(imgs, max_size):
         idx += s
     return res
 
+# ----------------- HÀM XỬ LÝ 9 VỊ TRÍ -----------------
+def get_alignment(pos_str):
+    if "Trái" in pos_str: return PP_ALIGN.LEFT
+    elif "Phải" in pos_str: return PP_ALIGN.RIGHT
+    else: return PP_ALIGN.CENTER
+
+def get_cover_y(pos_str, slide_h, is_sub=False):
+    if "Trên" in pos_str:
+        return Inches(0.5) if not is_sub else Inches(1.5)
+    elif "Dưới" in pos_str:
+        return slide_h - Inches(2.2) if not is_sub else slide_h - Inches(1.2)
+    else: # Giữa
+        return slide_h/2 - Inches(1.0) if not is_sub else slide_h/2 + Inches(0.2)
+
+def get_ty_y(pos_str, slide_h):
+    if "Trên" in pos_str: return Inches(0.8)
+    elif "Dưới" in pos_str: return slide_h - Inches(1.8)
+    else: return slide_h/2 - Inches(0.5)
+# --------------------------------------------------------
+
 # ==========================================
 # GIAO DIỆN HIỂN THỊ
 # ==========================================
@@ -183,11 +203,17 @@ st.header("Bước 4: Vị trí chèn & Thiết kế")
 vitri_input = st.text_input("Chèn vào sau Slide số mấy? (Gõ 0 để chèn cuối cùng):", "0")
 
 st.markdown("---")
-# TÍNH NĂNG MỚI: CUSTOM TRANG BÌA, TRANG NỘI DUNG, TRANG KẾT
+# TÍNH NĂNG MỚI: CUSTOM 9 VỊ TRÍ, GẠCH CHÂN TIÊU ĐỀ
 use_blank = False
-main_title, sub_title, cover_pos, cover_color = "", "", "Dưới cùng", "#FFFFFF"
+pos_options = [
+    "Trên - Trái", "Trên - Giữa", "Trên - Phải",
+    "Giữa - Trái", "Trung tâm", "Giữa - Phải",
+    "Dưới - Trái", "Dưới - Giữa", "Dưới - Phải"
+]
+
+main_title, sub_title, cover_pos, cover_color = "", "", "Dưới - Giữa", "#FFFFFF"
 content_title, content_color = "", "#003366"
-thankyou_pos, thankyou_color = "Dưới cùng", "#FFFFFF"
+thankyou_pos, thankyou_color = "Trung tâm", "#FFFFFF"
 bg_cover_file, bg_end_file = None, None
 
 if not st.session_state.template_bytes:
@@ -202,22 +228,18 @@ if not st.session_state.template_bytes:
             main_title = st.text_input("Tiêu đề chính:", placeholder="VD: BÁO CÁO NGHIỆM THU")
             sub_title = st.text_input("Tiêu đề phụ:", placeholder="VD: Ngày 16/08/2026")
             col1, col2 = st.columns(2)
-            with col1:
-                cover_pos = st.selectbox("Vị trí chữ:", ["Trên cùng", "Ở giữa", "Dưới cùng"], index=2, key="c_pos")
-            with col2:
-                cover_color = st.color_picker("Màu chữ:", "#FFFFFF", key="c_col")
+            with col1: cover_pos = st.selectbox("Chọn 9 vị trí chữ:", pos_options, index=7, key="c_pos")
+            with col2: cover_color = st.color_picker("Màu chữ:", "#FFFFFF", key="c_col")
 
         with st.expander("2️⃣ TRANG NỘI DUNG (Các trang chứa ảnh)"):
-            content_title = st.text_input("Ghi chú góc trên bên trái:", placeholder="VD: HÌNH ẢNH THI CÔNG THỰC TẾ")
+            content_title = st.text_input("Ghi chú góc trên trái (Sẽ tự động gạch chân):", placeholder="VD: HÌNH ẢNH THI CÔNG THỰC TẾ")
             content_color = st.color_picker("Màu chữ ghi chú:", "#003366", key="con_col")
 
         with st.expander("3️⃣ TRANG KẾT THÚC (Thank You)"):
             bg_end_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Kết Thúc:", type=['jpg', 'jpeg', 'png'], key="end")
             col3, col4 = st.columns(2)
-            with col3:
-                thankyou_pos = st.selectbox("Vị trí chữ Thank You!:", ["Trên cùng", "Ở giữa", "Dưới cùng"], index=2, key="t_pos")
-            with col4:
-                thankyou_color = st.color_picker("Màu chữ:", "#FFFFFF", key="t_col")
+            with col3: thankyou_pos = st.selectbox("Chọn 9 vị trí chữ:", pos_options, index=4, key="t_pos")
+            with col4: thankyou_color = st.color_picker("Màu chữ:", "#FFFFFF", key="t_col")
 
 # --- XỬ LÝ XUẤT FILE ---
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
@@ -228,11 +250,9 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
-                # Chuẩn bị luồng ảnh nền
                 bg_cover_stream = process_bg_image(bg_cover_file) if use_blank else None
                 bg_end_stream = process_bg_image(bg_end_file) if use_blank else None
                 
-                # RGB Chữ
                 r_cov, g_cov, b_cov = hex_to_rgb(cover_color)
                 r_con, g_con, b_con = hex_to_rgb(content_color)
                 r_ty, g_ty, b_ty = hex_to_rgb(thankyou_color)
@@ -270,24 +290,18 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         bg_cover_stream.seek(0)
                         title_slide.shapes.add_picture(bg_cover_stream, 0, 0, width=slide_w, height=slide_h)
                     
-                    # Xác định tọa độ Y theo lựa chọn
-                    if cover_pos == "Trên cùng":
-                        y_main = Inches(0.8)
-                        y_sub = Inches(1.8)
-                    elif cover_pos == "Ở giữa":
-                        y_main = slide_h/2 - Inches(1.0)
-                        y_sub = slide_h/2 + Inches(0.2)
-                    else: # Dưới cùng
-                        y_main = slide_h - Inches(2.2)
-                        y_sub = slide_h - Inches(1.2)
+                    y_main = get_cover_y(cover_pos, slide_h, is_sub=False)
+                    y_sub = get_cover_y(cover_pos, slide_h, is_sub=True)
+                    align_cover = get_alignment(cover_pos)
 
                     if main_title:
+                        # Kéo textbox rộng từ mép trái sang mép phải, để text tự rớt dòng bám theo alignment
                         txBox = title_slide.shapes.add_textbox(Inches(0.5), y_main, slide_w - Inches(1), Inches(1))
                         tf = txBox.text_frame
                         tf.word_wrap = True
                         p = tf.paragraphs[0]
                         p.text = main_title.upper()
-                        p.alignment = PP_ALIGN.CENTER
+                        p.alignment = align_cover
                         p.font.size = Pt(44)
                         p.font.bold = True
                         p.font.color.rgb = RGBColor(r_cov, g_cov, b_cov)
@@ -298,7 +312,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         tf2.word_wrap = True
                         p2 = tf2.paragraphs[0]
                         p2.text = sub_title
-                        p2.alignment = PP_ALIGN.CENTER
+                        p2.alignment = align_cover
                         p2.font.size = Pt(24)
                         p2.font.color.rgb = RGBColor(r_cov, g_cov, b_cov)
                     
@@ -335,7 +349,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         pass
                 image_data.sort(key=lambda x: (x['timestamp'], x['name']))
 
-                # Hàm chèn Tiêu đề Nội dung vào góc trên trái
+                # Hàm chèn Tiêu đề Nội dung có GẠCH CHÂN
                 def add_content_title(slide_obj):
                     if use_blank and content_title:
                         tx = slide_obj.shapes.add_textbox(Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6))
@@ -344,6 +358,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         p_c.text = content_title.upper()
                         p_c.font.size = Pt(22)
                         p_c.font.bold = True
+                        p_c.font.underline = True # Thêm dòng kẻ dưới chữ
                         p_c.font.color.rgb = RGBColor(r_con, g_con, b_con)
 
                 # ==========================
@@ -354,7 +369,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     while i < len(image_data):
                         current_img = image_data[i]
                         slide = prs.slides.add_slide(slide_layout) 
-                        add_content_title(slide) # Gắn Title trang nội dung
+                        add_content_title(slide) 
 
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
                         
@@ -409,7 +424,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         n = len(chunk)
 
                         slide = prs.slides.add_slide(slide_layout)
-                        add_content_title(slide) # Gắn Title trang nội dung
+                        add_content_title(slide) 
 
                         move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
@@ -436,19 +451,15 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     
                     move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
-                    if thankyou_pos == "Trên cùng":
-                        y_ty = Inches(1.5)
-                    elif thankyou_pos == "Ở giữa":
-                        y_ty = slide_h/2 - Inches(0.5)
-                    else: # Dưới cùng
-                        y_ty = slide_h - Inches(2.0)
+                    y_ty = get_ty_y(thankyou_pos, slide_h)
+                    align_ty = get_alignment(thankyou_pos)
 
                     txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), y_ty, slide_w - Inches(1), Inches(1))
                     tf_ty = txBox_ty.text_frame
                     tf_ty.word_wrap = True
                     p_ty = tf_ty.paragraphs[0]
                     p_ty.text = "THANK YOU!"
-                    p_ty.alignment = PP_ALIGN.CENTER
+                    p_ty.alignment = align_ty
                     p_ty.font.size = Pt(50) 
                     p_ty.font.bold = True
                     p_ty.font.color.rgb = RGBColor(r_ty, g_ty, b_ty)
