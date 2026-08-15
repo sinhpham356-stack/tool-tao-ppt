@@ -21,7 +21,7 @@ except ImportError:
 st.set_page_config(page_title="Công Cụ Chèn Ảnh PowerPoint & PDF", page_icon="⚡", layout="centered")
 
 # ==========================================
-# KHỞI TẠO BỘ NHỚ TẠM (SỬA LỖI MẤT NÚT TẢI)
+# KHỞI TẠO BỘ NHỚ TẠM
 # ==========================================
 if "photo_cart" not in st.session_state: st.session_state.photo_cart = {} 
 if "template_bytes" not in st.session_state: st.session_state.template_bytes = None 
@@ -105,6 +105,21 @@ def draw_adaptive_grid(slide, layout_rows, start_x_base, start_y_base, usable_w,
             add_image_exact(slide, img['stream'], current_x, current_y, img_w, H_final)
             current_x += img_w + GAP
         current_y += H_final + GAP
+
+# => ĐÂY LÀ HÀM BỊ LỠ TAY XÓA MẤT (ĐÃ THÊM LẠI)
+def partition_images(imgs, max_size):
+    if not imgs: return []
+    n = len(imgs)
+    num_slides = math.ceil(n / max_size)
+    base = n // num_slides
+    rem = n % num_slides
+    res = []
+    idx = 0
+    for i in range(num_slides):
+        s = base + 1 if i < rem else base
+        res.append(imgs[idx:idx+s])
+        idx += s
+    return res
 
 # ------------------------------------------
 # HÀM VẼ PDF ĐỘC LẬP BẰNG PILLOW
@@ -333,7 +348,6 @@ with col_btn2:
 if btn_pptx or btn_pdf:
     is_pdf = btn_pdf
     
-    # Ẩn nút tải cũ khi bắt đầu tạo file mới
     st.session_state.show_download_pptx = False
     st.session_state.show_download_pdf = False
 
@@ -568,7 +582,6 @@ if btn_pptx or btn_pdf:
 
                 output_stream = io.BytesIO()
                 
-                # Ghi luồng file vào bộ nhớ
                 if is_pdf:
                     if len(pdf_slides) == 0:
                         st.error("⚠️ Không có gì để xuất PDF! Bác cần chèn ảnh hoặc bật chế độ Tạo file mới.")
