@@ -169,17 +169,20 @@ if uploaded_images:
             count += 1
     if count > 0: st.success(f"🎉 Vừa nhặt thêm {count} ảnh vào giỏ!")
 
-camera_photo = st.camera_input("📷 Hoặc chụp ảnh thực tế tại hiện trường")
-if camera_photo:
-    cam_bytes = camera_photo.getvalue()
-    is_duplicate = False
-    for item in st.session_state.photo_cart.values():
-        if item["bytes"] == cam_bytes:
-            is_duplicate = True; break
-    if not is_duplicate:
-        cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
-        st.session_state.photo_cart[cam_name] = {"bytes": cam_bytes, "name": cam_name}
-        st.success("📸 Đã ném ảnh vừa chụp vào giỏ!")
+# NÚT GẠT BẬT/TẮT CAMERA ĐỂ ĐỠ VƯỚNG MÀN HÌNH
+enable_camera = st.toggle("📷 Bật máy ảnh để chụp trực tiếp")
+if enable_camera:
+    camera_photo = st.camera_input("Chụp ảnh thực tế tại hiện trường")
+    if camera_photo:
+        cam_bytes = camera_photo.getvalue()
+        is_duplicate = False
+        for item in st.session_state.photo_cart.values():
+            if item["bytes"] == cam_bytes:
+                is_duplicate = True; break
+        if not is_duplicate:
+            cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
+            st.session_state.photo_cart[cam_name] = {"bytes": cam_bytes, "name": cam_name}
+            st.success("📸 Đã ném ảnh vừa chụp vào giỏ!")
 
 if st.session_state.photo_cart:
     st.info(f"🛒 **TRONG GIỎ ĐANG CÓ: {len(st.session_state.photo_cart)} ẢNH** ĐÃ SẴN SÀNG.")
@@ -226,7 +229,6 @@ if not st.session_state.template_bytes:
 
         with st.expander("3️⃣ TRANG KẾT THÚC (Thank You)"):
             bg_end_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Kết Thúc:", type=['jpg', 'jpeg', 'png'], key="end")
-            # TÍNH NĂNG MỚI: TÙY CHỈNH CHỮ KẾT THÚC
             end_title = st.text_input("Ghi chú kết thúc (Xóa trống nếu không muốn hiện chữ):", value="THANK YOU!")
             col_grid2, col_color2 = st.columns([2, 1])
             with col_grid2: render_position_grid("ty_pos", "ty")
@@ -336,7 +338,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     except Exception: pass
                 image_data.sort(key=lambda x: (x['timestamp'], x['name']))
 
-                # Hàm chèn Tiêu đề Nội dung có GẠCH CHÂN
+                # Hàm chèn Tiêu đề Nội dung
                 def add_content_title(slide_obj):
                     if use_blank and content_title:
                         tx = slide_obj.shapes.add_textbox(Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6))
@@ -440,7 +442,6 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                         ty_slide.shapes.add_picture(bg_end_stream, 0, 0, width=slide_w, height=slide_h)
                     move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
 
-                    # CHỈ TẠO CHỮ NẾU NGƯỜI DÙNG CÓ GÕ TEXT
                     if end_title.strip():
                         y_ty = get_ty_y(st.session_state.ty_pos, slide_h)
                         align_ty = get_alignment(st.session_state.ty_pos)
