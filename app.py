@@ -125,9 +125,19 @@ if uploaded_images:
 
 camera_photo = st.camera_input("📷 Hoặc chụp ảnh thực tế tại hiện trường")
 if camera_photo:
-    cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
-    st.session_state.photo_cart[cam_name] = {"bytes": camera_photo.getvalue(), "name": cam_name}
-    st.success("📸 Đã ném ảnh vừa chụp vào giỏ!")
+    cam_bytes = camera_photo.getvalue()
+    
+    # BỘ LỌC CHỐNG NHÂN BẢN ẢNH KHI TRANG WEB RELOAD
+    is_duplicate = False
+    for item in st.session_state.photo_cart.values():
+        if item["bytes"] == cam_bytes:
+            is_duplicate = True
+            break
+            
+    if not is_duplicate:
+        cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
+        st.session_state.photo_cart[cam_name] = {"bytes": cam_bytes, "name": cam_name}
+        st.success("📸 Đã ném ảnh vừa chụp vào giỏ!")
 
 if st.session_state.photo_cart:
     st.info(f"🛒 **TRONG GIỎ ĐANG CÓ: {len(st.session_state.photo_cart)} ẢNH** ĐÃ SẴN SÀNG.")
@@ -195,6 +205,9 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                     prs = Presentation(io.BytesIO(st.session_state.template_bytes))
                 else:
                     prs = Presentation()
+                    # ÉP FILE TRẮNG VỀ CHUẨN WIDESCREEN 16:9
+                    prs.slide_width = Inches(13.3333333)
+                    prs.slide_height = Inches(7.5)
 
                 tong_slide = len(prs.slides)
                 vi_tri_hien_tai = tong_slide 
