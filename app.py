@@ -8,6 +8,13 @@ from pptx.util import Inches
 from pptx.dml.color import RGBColor
 from PIL import Image, ImageOps
 
+# --- SỬA LỖI ĐỌC ẢNH IPHONE (HEIC) ---
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
+
 # ==========================================
 # CẤU HÌNH GIAO DIỆN WEB
 # ==========================================
@@ -90,10 +97,9 @@ template_file = st.file_uploader("Chọn file .pptx", type=["pptx"])
 
 st.header("Bước 2: Chọn Ảnh (Từ Thư Viện Hoặc Chụp Camera)")
 
-# Cho phép chọn file linh hoạt không bị giới hạn định dạng ngặt nghèo
+# ĐÃ SỬA: Loại bỏ tham số 'type' để trình duyệt điện thoại không bị lỗi chặn file
 uploaded_images = st.file_uploader(
-    "📁 Chọn hoặc bôi đen nhiều ảnh từ Thư viện máy (Hỗ trợ JPG, PNG, WEBP...)", 
-    type=["jpg", "jpeg", "png", "webp", "heic"], 
+    "📁 Chọn hoặc bôi đen nhiều ảnh từ Thư viện máy", 
     accept_multiple_files=True
 )
 
