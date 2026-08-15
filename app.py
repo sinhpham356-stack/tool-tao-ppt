@@ -88,8 +88,34 @@ st.markdown("Chèn ảnh tự động, giữ đúng thời gian chụp, tràn vi
 st.header("Bước 1: Tải lên File PowerPoint Mẫu")
 template_file = st.file_uploader("Chọn file .pptx", type=["pptx"])
 
-st.header("Bước 2: Chọn Ảnh Cần Chèn")
-uploaded_images = st.file_uploader("Quét chọn nhiều ảnh cùng lúc", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True)
+st.header("Bước 2: Cung cấp Ảnh (Chọn từ máy HOẶC Chụp trực tiếp)")
+input_method = st.radio("Chọn phương thức nhập ảnh:", ("📂 Tải nhiều ảnh từ thư viện máy", "📷 Chụp ảnh trực tiếp bằng Camera"))
+
+all_images_to_process = []
+
+if "thư viện" in input_method:
+    uploaded_images = st.file_uploader("Quét chọn nhiều ảnh cùng lúc", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True)
+    if uploaded_images:
+        all_images_to_process = uploaded_images
+else:
+    # Cho phép chụp từng ảnh trực tiếp qua camera
+    camera_photo = st.camera_input("Bấm nút để chụp ảnh hiện trường")
+    if camera_photo:
+        # Nếu người dùng chụp, lưu vào danh sách
+        if "captured_photos" not in st.session_state:
+            st.session_state.captured_photos = []
+        
+        # Tránh lưu trùng lặp liên tục khi Streamlit reload
+        if not st.session_state.captured_photos or st.session_state.captured_photos[-1].name != camera_photo.name:
+            st.session_state.captured_photos.append(camera_photo)
+            
+        st.success(f"Đã chụp thành công {len(st.session_state.captured_photos)} ảnh!")
+        
+        if st.button("🗑️ Xóa danh sách ảnh đã chụp để chụp lại từ đầu"):
+            st.session_state.captured_photos = []
+            st.rerun()
+            
+        all_images_to_process = st.session_state.captured_photos
 
 st.header("Bước 3: Tùy Chỉnh Layout")
 mode = st.radio("Chọn chế độ:", 
@@ -107,8 +133,8 @@ vitri_input = st.text_input("Chèn vào sau Slide số mấy? (Gõ 0 để chèn
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
     if not template_file:
         st.error("⚠️ Vui lòng tải lên file PowerPoint mẫu!")
-    elif not uploaded_images:
-        st.error("⚠️ Vui lòng tải lên ít nhất 1 tấm ảnh!")
+    elif not all_images_to_process:
+        st.error("⚠️ Vui lòng tải lên hoặc chụp ít nhất 1 tấm ảnh!")
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
@@ -140,7 +166,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                 usable_h = slide_h - CACH_LE_TREN - CACH_LE_DUOI
 
                 image_data = []
-                for img_file in uploaded_images:
+                for img_file in all_images_to_process:
                     img_bytes = img_file.read()
                     img_stream = io.BytesIO(img_bytes)
                     
@@ -162,7 +188,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                             'is_portrait': is_portrait, 
                             'w': width, 
                             'h': height,
-                            'name': img_file.name,
+                            'name': getattr(img_file, 'name', 'camera_shot.jpg'),
                             'timestamp': str(dt_str)
                         })
                     except Exception:
