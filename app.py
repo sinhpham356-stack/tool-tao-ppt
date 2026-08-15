@@ -88,34 +88,36 @@ st.markdown("Chèn ảnh tự động, giữ đúng thời gian chụp, tràn vi
 st.header("Bước 1: Tải lên File PowerPoint Mẫu")
 template_file = st.file_uploader("Chọn file .pptx", type=["pptx"])
 
-st.header("Bước 2: Cung cấp Ảnh (Chọn từ máy HOẶC Chụp trực tiếp)")
-input_method = st.radio("Chọn phương thức nhập ảnh:", ("📂 Tải nhiều ảnh từ thư viện máy", "📷 Chụp ảnh trực tiếp bằng Camera"))
+st.header("Bước 2: Chọn Ảnh (Từ Thư Viện Hoặc Chụp Camera)")
+
+# Cho phép chọn file linh hoạt không bị giới hạn định dạng ngặt nghèo
+uploaded_images = st.file_uploader(
+    "📁 Chọn hoặc bôi đen nhiều ảnh từ Thư viện máy (Hỗ trợ JPG, PNG, WEBP...)", 
+    type=["jpg", "jpeg", "png", "webp", "heic"], 
+    accept_multiple_files=True
+)
+
+st.markdown("---")
+st.markdown("📷 **Hoặc chụp ảnh trực tiếp bằng Camera (nếu cần):**")
+camera_photo = st.camera_input("Bấm để chụp ảnh thực tế")
 
 all_images_to_process = []
 
-if "thư viện" in input_method:
-    uploaded_images = st.file_uploader("Quét chọn nhiều ảnh cùng lúc", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True)
-    if uploaded_images:
-        all_images_to_process = uploaded_images
-else:
-    # Cho phép chụp từng ảnh trực tiếp qua camera
-    camera_photo = st.camera_input("Bấm nút để chụp ảnh hiện trường")
-    if camera_photo:
-        # Nếu người dùng chụp, lưu vào danh sách
-        if "captured_photos" not in st.session_state:
-            st.session_state.captured_photos = []
+if uploaded_images:
+    all_images_to_process.extend(uploaded_images)
+
+if camera_photo:
+    if "captured_photos" not in st.session_state:
+        st.session_state.captured_photos = []
+    if not st.session_state.captured_photos or st.session_state.captured_photos[-1].name != camera_photo.name:
+        st.session_state.captured_photos.append(camera_photo)
+    
+    st.info(f"Đang có {len(st.session_state.captured_photos)} ảnh chụp từ camera.")
+    if st.button("🗑️ Xóa danh sách ảnh chụp"):
+        st.session_state.captured_photos = []
+        st.rerun()
         
-        # Tránh lưu trùng lặp liên tục khi Streamlit reload
-        if not st.session_state.captured_photos or st.session_state.captured_photos[-1].name != camera_photo.name:
-            st.session_state.captured_photos.append(camera_photo)
-            
-        st.success(f"Đã chụp thành công {len(st.session_state.captured_photos)} ảnh!")
-        
-        if st.button("🗑️ Xóa danh sách ảnh đã chụp để chụp lại từ đầu"):
-            st.session_state.captured_photos = []
-            st.rerun()
-            
-        all_images_to_process = st.session_state.captured_photos
+    all_images_to_process.extend(st.session_state.captured_photos)
 
 st.header("Bước 3: Tùy Chỉnh Layout")
 mode = st.radio("Chọn chế độ:", 
@@ -132,9 +134,9 @@ vitri_input = st.text_input("Chèn vào sau Slide số mấy? (Gõ 0 để chèn
 
 if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="primary"):
     if not template_file:
-        st.error("⚠️ Vui lòng tải lên file PowerPoint mẫu!")
+        st.error("⚠️ Vui lòng tải lên file PowerPoint mẫu ở Bước 1!")
     elif not all_images_to_process:
-        st.error("⚠️ Vui lòng tải lên hoặc chụp ít nhất 1 tấm ảnh!")
+        st.error("⚠️ Vui lòng chọn hoặc chụp ít nhất 1 tấm ảnh ở Bước 2!")
     else:
         with st.spinner("Đang tự động dàn trang... Vui lòng đợi nhé..."):
             try:
@@ -188,7 +190,7 @@ if st.button("🚀 XUẤT FILE POWERPOINT", use_container_width=True, type="prim
                             'is_portrait': is_portrait, 
                             'w': width, 
                             'h': height,
-                            'name': getattr(img_file, 'name', 'camera_shot.jpg'),
+                            'name': getattr(img_file, 'name', 'photo.jpg'),
                             'timestamp': str(dt_str)
                         })
                     except Exception:
