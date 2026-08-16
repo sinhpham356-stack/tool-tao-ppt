@@ -3,6 +3,7 @@ import re
 import math
 import os
 import urllib.request
+import gc
 from datetime import datetime
 import streamlit as st
 from pptx import Presentation
@@ -20,7 +21,6 @@ except ImportError:
 
 st.set_page_config(page_title="Công Cụ Chèn Ảnh PowerPoint & PDF", page_icon="⚡", layout="centered")
 
-# CSS HACK: ẨN DÒNG CHỮ "200MB PER FILE" CHO GIAO DIỆN SẠCH SẼ
 st.markdown("""
     <style>
         div[data-testid="stFileUploadDropzone"] > div > small {
@@ -29,9 +29,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# KHỞI TẠO BỘ NHỚ TẠM
-# ==========================================
 if "photo_cart" not in st.session_state: st.session_state.photo_cart = {} 
 if "template_bytes" not in st.session_state: st.session_state.template_bytes = None 
 if "cover_pos" not in st.session_state: st.session_state.cover_pos = "Dưới - Giữa"
@@ -42,9 +39,6 @@ if "final_pptx" not in st.session_state: st.session_state.final_pptx = None
 if "show_download_pdf" not in st.session_state: st.session_state.show_download_pdf = False
 if "show_download_pptx" not in st.session_state: st.session_state.show_download_pptx = False
 
-# ==========================================
-# HÀM LÕI XỬ LÝ CHUNG & TỐI ƯU RAM
-# ==========================================
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
@@ -70,25 +64,20 @@ def process_bg_image(uploaded_file, target_ratio=16/9):
             return bg_stream
     except Exception: return None
 
-# ĐỘNG CƠ TỐI ƯU ẢNH TRƯỚC KHI VÀO GIỎ HÀNG (GIẢM 80% RAM)
 def optimize_and_extract_info(img_bytes, file_name):
     try:
         with Image.open(io.BytesIO(img_bytes)) as img:
-            # 1. Trích xuất thời gian thực tế ngay lập tức
             dt_str = "9999"
             exif = img.getexif()
             if exif: dt_str = exif.get(36867) or exif.get(306) or "9999"
             
-            # 2. Xoay chuẩn và đổi hệ màu
             img_t = ImageOps.exif_transpose(img)
             if img_t.mode != 'RGB': img_t = img_t.convert('RGB')
             
-            # 3. Ép độ phân giải xuống giới hạn 1600px để máy không bị nổ RAM
             img_t.thumbnail((1600, 1600), Image.LANCZOS)
             w, h = img_t.size
             is_portrait = h >= w
             
-            # 4. Lưu thành định dạng siêu nhẹ
             opt_stream = io.BytesIO()
             img_t.save(opt_stream, format='JPEG', quality=85)
             
@@ -96,16 +85,11 @@ def optimize_and_extract_info(img_bytes, file_name):
                 "bytes": opt_stream.getvalue(),
                 "name": file_name,
                 "timestamp": str(dt_str),
-                "w": w,
-                "h": h,
-                "is_portrait": is_portrait
+                "w": w, "h": h, "is_portrait": is_portrait
             }
-    except Exception as e:
-        return None
+    except Exception: return None
 
-# ------------------------------------------
-# HÀM VẼ PPTX
-# ------------------------------------------
+# ... [CÁC HÀM PPTX & PDF GIỮ NGUYÊN BẢN CHUẨN] ...
 def add_image_exact(slide, img_stream, left, top, width, height):
     img_stream.seek(0)
     pic = slide.shapes.add_picture(img_stream, int(left), int(top), width=int(width), height=int(height))
@@ -156,11 +140,7 @@ def partition_images(imgs, max_size):
         idx += s
     return res
 
-# ------------------------------------------
-# HÀM VẼ PDF ĐỘC LẬP BẰNG PILLOW
-# ------------------------------------------
-def emu_to_px(emu):
-    return int((emu / 914400.0) * 300)
+def emu_to_px(emu): return int((emu / 914400.0) * 300)
 
 def add_pdf_slide(pdf_slides, bg_stream=None):
     img = Image.new('RGB', (4000, 2250), (255, 255, 255))
@@ -185,10 +165,7 @@ def draw_text_pdf(slide_img, text, x_emu, y_emu, w_emu, h_emu, align_pos, pt_siz
     except: font = ImageFont.load_default()
         
     r, g, b = hex_to_rgb(color_hex)
-    
-    words = text.split()
-    lines = []
-    current_line = ""
+    words = text.split(); lines = []; current_line = ""
     for word in words:
         test_line = current_line + " " + word if current_line else word
         bbox = draw.textbbox((0,0), test_line, font=font)
@@ -247,7 +224,6 @@ def draw_adaptive_grid_pdf(slide_img, layout_rows, start_x_base, start_y_base, u
             current_x += img_w + GAP
         current_y += H_final + GAP
 
-# ----------------- 9 ĐIỂM NEO VỊ TRÍ -----------------
 def render_position_grid(state_key, key_prefix):
     def set_pos(pos): st.session_state[state_key] = pos
     current_pos = st.session_state[state_key]
@@ -285,7 +261,6 @@ def get_ty_y(pos_str, slide_h):
 # GIAO DIỆN HIỂN THỊ
 # ==========================================
 st.title("⚡ TRỢ LÝ TẠO REPORT BẰNG HÌNH ẢNH")
-st.error("💡 **MẸO CHO iPHONE:** Đừng chọn 90 ảnh cùng lúc web sẽ văng! Hãy nhặt 15-20 ảnh -> đợi nạp vào giỏ -> Nhặt tiếp 20 ảnh khác. Giỏ hàng sẽ tự cộng dồn!")
 
 st.header("Bước 1: Tải lên File PowerPoint Mẫu (Không bắt buộc)")
 template_file = st.file_uploader("Chọn file .pptx (Chỉ cần up 1 lần)", type=["pptx"])
@@ -297,17 +272,19 @@ if st.session_state.template_bytes:
         st.rerun()
 
 st.header("Bước 2: Ném ảnh vào Giỏ (Hỗ trợ nén siêu tốc)")
+st.info("☁️ **LƯU Ý VỚI ẢNH CŨ TRÊN ICLOUD:** Nếu chọn nhiều ảnh cũ, iPhone bắt phải tải mây về nên rất dễ bị VĂNG Web. \n\n👉 **MẸO:** Mở app Ảnh -> Chọn các ảnh cũ -> **Lưu vào Tệp (Save to Files)**. Sau đó quay lại Web bấm nút bên dưới và up từ mục Tệp sẽ mượt 100%!")
+
 uploaded_images = st.file_uploader("📂 Nhấn để chọn ảnh từ máy (Gom nhiều lần thoải mái)", accept_multiple_files=True)
 if uploaded_images:
     count = 0
-    with st.spinner("Đang hút ảnh vào giỏ... Vui lòng chờ vài giây..."):
+    with st.spinner("Đang hút ảnh vào giỏ và tối ưu dung lượng..."):
         for f in uploaded_images:
             if f.name not in st.session_state.photo_cart:
-                # Gọi Động cơ Nén ảnh thông minh trước khi nhét vào giỏ
                 optimized_data = optimize_and_extract_info(f.getvalue(), f.name)
                 if optimized_data:
                     st.session_state.photo_cart[f.name] = optimized_data
                     count += 1
+        gc.collect() # Dọn rác RAM ngay
     if count > 0: st.success(f"🎉 Vừa nhặt thêm {count} ảnh vào giỏ!")
 
 enable_camera = st.toggle("📷 Bật máy ảnh để chụp trực tiếp")
@@ -470,16 +447,13 @@ if btn_pptx or btn_pdf:
                 usable_w = slide_w - CACH_LE_TRAI - CACH_LE_PHAI
                 usable_h = slide_h - CACH_LE_TREN - CACH_LE_DUOI
 
-                # Lọc và sắp xếp ảnh (Đã được nén và lưu thông tin sẵn)
                 image_data = []
                 for key, img_info in st.session_state.photo_cart.items():
                     image_data.append({
                         'stream': io.BytesIO(img_info["bytes"]),
                         'is_portrait': img_info["is_portrait"], 
-                        'w': img_info["w"],
-                        'h': img_info["h"],
-                        'name': img_info["name"],
-                        'timestamp': img_info["timestamp"]
+                        'w': img_info["w"], 'h': img_info["h"],
+                        'name': img_info["name"], 'timestamp': img_info["timestamp"]
                     })
                 image_data.sort(key=lambda x: (x['timestamp'], x['name']))
 
