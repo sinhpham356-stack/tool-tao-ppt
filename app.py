@@ -89,7 +89,6 @@ def optimize_and_extract_info(img_bytes, file_name):
             }
     except Exception: return None
 
-# ... [CÁC HÀM PPTX & PDF GIỮ NGUYÊN BẢN CHUẨN] ...
 def add_image_exact(slide, img_stream, left, top, width, height):
     img_stream.seek(0)
     pic = slide.shapes.add_picture(img_stream, int(left), int(top), width=int(width), height=int(height))
@@ -142,12 +141,14 @@ def partition_images(imgs, max_size):
 
 def emu_to_px(emu): return int((emu / 914400.0) * 300)
 
-def add_pdf_slide(pdf_slides, bg_stream=None):
-    img = Image.new('RGB', (4000, 2250), (255, 255, 255))
+def add_pdf_slide(pdf_slides, w_emu, h_emu, bg_stream=None):
+    pw = emu_to_px(w_emu)
+    ph = emu_to_px(h_emu)
+    img = Image.new('RGB', (pw, ph), (255, 255, 255))
     if bg_stream:
         bg_stream.seek(0)
         bg = Image.open(bg_stream).convert('RGB')
-        bg = bg.resize((4000, 2250), Image.LANCZOS)
+        bg = bg.resize((pw, ph), Image.LANCZOS)
         img.paste(bg, (0, 0))
     pdf_slides.append(img)
     return img
@@ -261,6 +262,7 @@ def get_ty_y(pos_str, slide_h):
 # GIAO DIỆN HIỂN THỊ
 # ==========================================
 st.title("⚡ TRỢ LÝ TẠO REPORT BẰNG HÌNH ẢNH")
+st.error("💡 **MẸO CHO iPHONE:** Đừng chọn 90 ảnh cùng lúc web sẽ văng! Mở app Ảnh -> Lưu các ảnh vào mục **Tệp (Files)** -> Up qua Tệp sẽ mượt 100%!")
 
 st.header("Bước 1: Tải lên File PowerPoint Mẫu (Không bắt buộc)")
 template_file = st.file_uploader("Chọn file .pptx (Chỉ cần up 1 lần)", type=["pptx"])
@@ -271,20 +273,18 @@ if st.session_state.template_bytes:
         st.session_state.template_bytes = None
         st.rerun()
 
-st.header("Bước 2: Ném ảnh vào Giỏ (Hỗ trợ nén siêu tốc)")
-st.info("☁️ **LƯU Ý VỚI ẢNH CŨ TRÊN ICLOUD:** Nếu chọn nhiều ảnh cũ, iPhone bắt phải tải mây về nên rất dễ bị VĂNG Web. \n\n👉 **MẸO:** Mở app Ảnh -> Chọn các ảnh cũ -> **Lưu vào Tệp (Save to Files)**. Sau đó quay lại Web bấm nút bên dưới và up từ mục Tệp sẽ mượt 100%!")
-
+st.header("Bước 2: Ném ảnh vào Giỏ")
 uploaded_images = st.file_uploader("📂 Nhấn để chọn ảnh từ máy (Gom nhiều lần thoải mái)", accept_multiple_files=True)
 if uploaded_images:
     count = 0
-    with st.spinner("Đang hút ảnh vào giỏ và tối ưu dung lượng..."):
+    with st.spinner("Đang hút ảnh vào giỏ..."):
         for f in uploaded_images:
             if f.name not in st.session_state.photo_cart:
                 optimized_data = optimize_and_extract_info(f.getvalue(), f.name)
                 if optimized_data:
                     st.session_state.photo_cart[f.name] = optimized_data
                     count += 1
-        gc.collect() # Dọn rác RAM ngay
+        gc.collect() 
     if count > 0: st.success(f"🎉 Vừa nhặt thêm {count} ảnh vào giỏ!")
 
 enable_camera = st.toggle("📷 Bật máy ảnh để chụp trực tiếp")
@@ -365,33 +365,38 @@ if btn_pptx or btn_pdf:
     st.session_state.show_download_pptx = False
     st.session_state.show_download_pdf = False
 
-    if is_pdf and st.session_state.template_bytes and not use_blank:
-        st.error("⚠️ Xuất PDF trực tiếp chỉ hỗ trợ khi bác chọn 'TẠO FILE MỚI TINH'. Vui lòng tích vào ô Bỏ qua file mẫu ở Bước 4, hoặc chọn Xuất PowerPoint!")
-    elif not st.session_state.template_bytes and not use_blank:
+    if not st.session_state.template_bytes and not use_blank:
         st.error("⚠️ Vui lòng tải file mẫu ở Bước 1, HOẶC tích vào ô tạo file mới nhé!")
     elif not st.session_state.photo_cart:
         st.error("⚠️ Giỏ ảnh đang trống trơn! Bác chọn thêm ảnh ở Bước 2 nhé!")
     else:
+        # CẢNH BÁO NẾU XUẤT PDF TỪ FILE MẪU PPTX
+        if is_pdf and st.session_state.template_bytes and not use_blank:
+            st.warning("⚠️ LƯU Ý KỸ: Bác đang xuất PDF từ File Mẫu .pptx. Web không có phần mềm MS PowerPoint để vẽ lại khung viền/logo của công ty bác, nên bản PDF này sẽ chỉ có ẢNH THI CÔNG trên NỀN TRẮNG. (👉 Khuyên dùng: Hãy lưu slide form mẫu thành ảnh JPG rồi tải lên ở mục Tạo File Mới nhé!)")
+
         with st.spinner("Đang bay tốc độ bàn thờ để xuất file..."):
             try:
-                bg_cover_stream = process_bg_image(bg_cover_file) if use_blank else None
-                bg_content_stream = process_bg_image(bg_content_file) if use_blank else None
-                bg_end_stream = process_bg_image(bg_end_file) if use_blank else None
+                # 1. Đọc tỷ lệ khung hình
+                if st.session_state.template_bytes:
+                    prs = Presentation(io.BytesIO(st.session_state.template_bytes))
+                else:
+                    prs = Presentation()
+                    prs.slide_width = Inches(13.3333333)
+                    prs.slide_height = Inches(7.5)
+                
+                slide_w = prs.slide_width
+                slide_h = prs.slide_height
+                target_ratio = slide_w / slide_h
+
+                bg_cover_stream = process_bg_image(bg_cover_file, target_ratio) if use_blank else None
+                bg_content_stream = process_bg_image(bg_content_file, target_ratio) if use_blank else None
+                bg_end_stream = process_bg_image(bg_end_file, target_ratio) if use_blank else None
                 
                 r_cov, g_cov, b_cov = hex_to_rgb(cover_color)
                 r_con, g_con, b_con = hex_to_rgb(content_color)
                 r_ty, g_ty, b_ty = hex_to_rgb(thankyou_color)
 
-                slide_w = Inches(13.3333333)
-                slide_h = Inches(7.5)
-
                 if not is_pdf:
-                    if st.session_state.template_bytes:
-                        prs = Presentation(io.BytesIO(st.session_state.template_bytes))
-                    else:
-                        prs = Presentation()
-                        prs.slide_width = slide_w; prs.slide_height = slide_h
-                    
                     tong_slide = len(prs.slides)
                     vi_tri_hien_tai = tong_slide 
                     if tong_slide > 0:
@@ -400,9 +405,11 @@ if btn_pptx or btn_pdf:
                             trang_chon = int(match.group())
                             if 0 < trang_chon <= tong_slide: vi_tri_hien_tai = trang_chon
                     else: vi_tri_hien_tai = 0
+                else:
+                    vi_tri_hien_tai = 0 # PDF luôn xuất từ đầu các ảnh nhét thêm
 
-                    try: slide_layout = prs.slide_layouts[6]
-                    except: slide_layout = prs.slide_layouts[0] 
+                try: slide_layout = prs.slide_layouts[6]
+                except: slide_layout = prs.slide_layouts[0] 
 
                 pdf_slides = [] 
 
@@ -415,7 +422,7 @@ if btn_pptx or btn_pdf:
                     align_cover = get_alignment(st.session_state.cover_pos)
 
                     if is_pdf:
-                        slide_pdf = add_pdf_slide(pdf_slides, bg_cover_stream)
+                        slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_cover_stream)
                         if main_title: draw_text_pdf(slide_pdf, main_title.upper(), Inches(0.5), y_main, slide_w - Inches(1), Inches(1), st.session_state.cover_pos, 44, cover_color)
                         if sub_title: draw_text_pdf(slide_pdf, sub_title, Inches(0.5), y_sub, slide_w - Inches(1), Inches(0.8), st.session_state.cover_pos, 24, cover_color)
                     else:
@@ -447,6 +454,7 @@ if btn_pptx or btn_pdf:
                 usable_w = slide_w - CACH_LE_TRAI - CACH_LE_PHAI
                 usable_h = slide_h - CACH_LE_TREN - CACH_LE_DUOI
 
+                # Lọc và sắp xếp ảnh
                 image_data = []
                 for key, img_info in st.session_state.photo_cart.items():
                     image_data.append({
@@ -473,7 +481,7 @@ if btn_pptx or btn_pdf:
                         current_img = image_data[i]
                         
                         if is_pdf:
-                            slide_pdf = add_pdf_slide(pdf_slides, bg_content_stream)
+                            slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_content_stream)
                             if use_blank and content_title:
                                 draw_text_pdf(slide_pdf, content_title.upper(), Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6), "Trái", 22, content_color, underline=True)
                         else:
@@ -537,7 +545,7 @@ if btn_pptx or btn_pdf:
                         n = len(chunk)
                         
                         if is_pdf:
-                            slide_pdf = add_pdf_slide(pdf_slides, bg_content_stream)
+                            slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_content_stream)
                             if use_blank and content_title: draw_text_pdf(slide_pdf, content_title.upper(), Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6), "Trái", 22, content_color, underline=True)
                         else:
                             slide = prs.slides.add_slide(slide_layout)
@@ -568,7 +576,7 @@ if btn_pptx or btn_pdf:
                     align_ty = get_alignment(st.session_state.ty_pos)
 
                     if is_pdf:
-                        slide_pdf = add_pdf_slide(pdf_slides, bg_end_stream)
+                        slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_end_stream)
                         if end_title.strip(): draw_text_pdf(slide_pdf, end_title.upper(), Inches(0.5), y_ty, slide_w - Inches(1), Inches(1), st.session_state.ty_pos, 50, thankyou_color)
                     else:
                         ty_slide = prs.slides.add_slide(slide_layout)
