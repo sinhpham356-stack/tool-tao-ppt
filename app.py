@@ -327,4 +327,49 @@ for idx, unit in enumerate(st.session_state.units):
     num_imgs = len(st.session_state.photo_cart[uid])
     total_images += num_imgs
     
-    with st.expander(f"📁 {unit['name']}
+    with st.expander(f"📁 {unit['name']} ({num_imgs} ảnh đã tải)", expanded=True):
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            new_name = st.text_input("Tên hiển thị trên Báo Cáo:", value=unit['name'], key=f"name_{uid}")
+            st.session_state.units[idx]['name'] = new_name
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🗑️ Xóa", key=f"del_{uid}"):
+                st.session_state.units.pop(idx)
+                if uid in st.session_state.photo_cart: del st.session_state.photo_cart[uid]
+                st.rerun()
+
+        # NÂNG CẤP: Cho phép nhận cả file ảnh và file pdf/pptx vào cùng 1 chỗ
+        uploaded_files = st.file_uploader(f"Thêm ảnh hoặc file PDF/PPTX cho {new_name}", accept_multiple_files=True, key=f"up_{uid}", type=['jpg', 'jpeg', 'png', 'heic', 'pdf', 'pptx'])
+        
+        if uploaded_files:
+            count_img = 0
+            count_doc = 0
+            with st.spinner("Đang hút ảnh và lục soát tài liệu..."):
+                for f in uploaded_files:
+                    fname = f.name.lower()
+                    # Nếu là file tài liệu (PDF/PPTX) -> Bóc tách ảnh
+                    if fname.endswith(('.pdf', '.pptx')):
+                        extracted_items = []
+                        if fname.endswith(".pdf"):
+                            extracted_items = extract_images_from_pdf(f.getvalue(), f.name)
+                        elif fname.endswith(".pptx"):
+                            extracted_items = extract_images_from_pptx(f.getvalue(), f.name)
+                            
+                        for ext_name, ext_bytes in extracted_items:
+                            if ext_name not in st.session_state.photo_cart[uid]:
+                                optimized_data = optimize_and_extract_info(ext_bytes, ext_name)
+                                if optimized_data:
+                                    st.session_state.photo_cart[uid][ext_name] = optimized_data
+                                    count_doc += 1
+                    # Nếu là file ảnh thường
+                    else:
+                        if f.name not in st.session_state.photo_cart[uid]:
+                            optimized_data = optimize_and_extract_info(f.getvalue(), f.name)
+                            if optimized_data:
+                                st.session_state.photo_cart[uid][f.name] = optimized_data
+                                count_img += 1
+                gc.collect() 
+            if count_img > 0 or count_doc > 0:
+                st.success(f"🎉 Đã thêm {count_img} ảnh thường và bóc tách {count_doc} ảnh từ tài liệu vào {new_name}!")
+                st.rerun()
