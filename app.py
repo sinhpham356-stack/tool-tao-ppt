@@ -205,4 +205,5 @@ def partition_images(imgs, max_size):
     return res
 
 def emu_to_px(emu): 
-    return int((emu
+    def emu_to_px(emu): 
+    return int((emu / 914400.0) * 300)
