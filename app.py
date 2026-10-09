@@ -174,7 +174,7 @@ def partition_images(imgs, max_size):
         idx += s
     return res
 
-def emu_to_px(emu): return int((emu / 914400.0) * 300)
+def emu_to_px(emu): return int((emu / 914400.0) * 120)
 
 def add_pdf_slide(pdf_slides, w_emu, h_emu, bg_stream=None):
     pw = emu_to_px(w_emu)
