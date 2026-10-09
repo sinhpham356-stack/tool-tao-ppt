@@ -757,4 +757,12 @@ if btn_pptx or btn_pdf:
 # ==========================================
 # KHU VỰC HIỂN THỊ NÚT TẢI XUỐNG CỐ ĐỊNH
 # ==========================================
-if st.session_state.show_download_pptx and st.session_state.final_pptx:
+if st.session_state.show_download_pdf and st.session_state.final_pdf:
+    st.success("✅ Thành công mỹ mãn! File PDF đã sẵn sàng.")
+    st.download_button(
+        label="📥 BẤM VÀO ĐÂY ĐỂ TẢI PDF VỀ MÁY",
+        data=st.session_state.final_pdf,
+        file_name="Report_Kiem_Tra.pdf",
+        mime="application/pdf",
+        type="primary"
+    )
