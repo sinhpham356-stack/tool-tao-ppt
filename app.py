@@ -339,59 +339,40 @@ for idx, unit in enumerate(st.session_state.units):
                 if uid in st.session_state.photo_cart: del st.session_state.photo_cart[uid]
                 st.rerun()
 
-        uploaded_images = st.file_uploader(f"Thêm ảnh cho {new_name}", accept_multiple_files=True, key=f"up_{uid}", type=['jpg', 'jpeg', 'png', 'heic'])
-        if uploaded_images:
-            count = 0
-            with st.spinner("Đang hút ảnh..."):
-                for f in uploaded_images:
-                    if f.name not in st.session_state.photo_cart[uid]:
-                        optimized_data = optimize_and_extract_info(f.getvalue(), f.name)
-                        if optimized_data:
-                            st.session_state.photo_cart[uid][f.name] = optimized_data
-                            count += 1
-                gc.collect() 
-            if count > 0:
-                st.success(f"🎉 Đã thêm {count} ảnh vào {new_name}!")
-                st.rerun()
-
-# --- BÓC TÁCH ẢNH TỪ FILE DOC/PPTX CỦA KHÁCH HÀNG ---
-st.markdown("---")
-st.subheader("Bóc tách ảnh từ File PDF hoặc PPTX (Của bên khác gửi)")
-doc_files = st.file_uploader("Tải lên file PDF hoặc PPTX để rút toàn bộ ảnh bên trong ra:", type=['pdf', 'pptx'], accept_multiple_files=True)
-
-if doc_files:
-    unit_options = {u["name"]: u["id"] for u in st.session_state.units}
-    if unit_options:
-        col_doc1, col_doc2 = st.columns([3, 2])
-        with col_doc1:
-            selected_unit_name_doc = st.selectbox("Chọn Đơn vị để nhét ảnh bóc tách vào:", list(unit_options.keys()), key="doc_unit")
-            selected_uid_doc = unit_options[selected_unit_name_doc]
-        with col_doc2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("✂️ Bóc tách ảnh ngay", type="primary"):
-                count_doc = 0
-                with st.spinner("Đang lục soát và bóc tách ảnh từ file..."):
-                    for df in doc_files:
-                        fname = df.name.lower()
+        # Cho phép nhận cả file ảnh và file pdf/pptx vào cùng 1 chỗ
+        uploaded_files = st.file_uploader(f"Thêm ảnh hoặc file PDF/PPTX cho {new_name}", accept_multiple_files=True, key=f"up_{uid}", type=['jpg', 'jpeg', 'png', 'heic', 'pdf', 'pptx'])
+        
+        if uploaded_files:
+            count_img = 0
+            count_doc = 0
+            with st.spinner("Đang hút ảnh và lục soát tài liệu..."):
+                for f in uploaded_files:
+                    fname = f.name.lower()
+                    # Nếu là file tài liệu (PDF/PPTX) -> Bóc tách ảnh
+                    if fname.endswith(('.pdf', '.pptx')):
                         extracted_items = []
                         if fname.endswith(".pdf"):
-                            extracted_items = extract_images_from_pdf(df.getvalue(), df.name)
+                            extracted_items = extract_images_from_pdf(f.getvalue(), f.name)
                         elif fname.endswith(".pptx"):
-                            extracted_items = extract_images_from_pptx(df.getvalue(), df.name)
+                            extracted_items = extract_images_from_pptx(f.getvalue(), f.name)
                             
                         for ext_name, ext_bytes in extracted_items:
-                            if ext_name not in st.session_state.photo_cart[selected_uid_doc]:
+                            if ext_name not in st.session_state.photo_cart[uid]:
                                 optimized_data = optimize_and_extract_info(ext_bytes, ext_name)
                                 if optimized_data:
-                                    st.session_state.photo_cart[selected_uid_doc][ext_name] = optimized_data
+                                    st.session_state.photo_cart[uid][ext_name] = optimized_data
                                     count_doc += 1
-                if count_doc > 0:
-                    st.success(f"🎉 Đã bóc tách thành công {count_doc} ảnh và thêm vào {selected_unit_name_doc}!")
-                    st.rerun()
-                else:
-                    st.warning("Không tìm thấy ảnh nào trong file này!")
-    else:
-        st.warning("Hãy thêm ít nhất 1 Đơn vị trước khi bóc tách.")
+                    # Nếu là file ảnh thường
+                    else:
+                        if f.name not in st.session_state.photo_cart[uid]:
+                            optimized_data = optimize_and_extract_info(f.getvalue(), f.name)
+                            if optimized_data:
+                                st.session_state.photo_cart[uid][f.name] = optimized_data
+                                count_img += 1
+                gc.collect() 
+            if count_img > 0 or count_doc > 0:
+                st.success(f"🎉 Đã thêm {count_img} ảnh thường và bóc tách {count_doc} ảnh từ tài liệu vào {new_name}!")
+                st.rerun()
 
 # --- Camera ---
 st.markdown("---")
@@ -413,9 +394,24 @@ if enable_camera:
     else:
         st.warning("Hãy thêm ít nhất 1 Đơn vị trước khi chụp.")
 
+# --- BẢNG TỔNG KẾT (TOTAL) ---
 if total_images > 0:
-    st.info(f"🛒 **TỔNG CỘNG ĐANG CÓ: {total_images} ẢNH** SẴN SÀNG.")
-    if st.button("🗑️ Xóa TOÀN BỘ ảnh để làm lại từ đầu"):
+    st.markdown("---")
+    st.subheader("📊 TỔNG KẾT (TOTAL)")
+    
+    col_tot1, col_tot2 = st.columns(2)
+    with col_tot1:
+        st.metric(label="Tổng số Hạng mục/Đơn vị", value=len(st.session_state.units))
+    with col_tot2:
+        st.metric(label="Tổng số Ảnh đã gom", value=total_images)
+        
+    with st.expander("Bảng kê chi tiết từng phần:", expanded=True):
+        for unit in st.session_state.units:
+            uid = unit["id"]
+            count = len(st.session_state.photo_cart.get(uid, {}))
+            st.markdown(f"- **{unit['name']}**: `{count}` ảnh")
+
+    if st.button("🗑️ Xóa TOÀN BỘ ảnh để làm lại từ đầu", use_container_width=True):
         for uid in st.session_state.photo_cart:
             st.session_state.photo_cart[uid] = {}
         st.rerun()
