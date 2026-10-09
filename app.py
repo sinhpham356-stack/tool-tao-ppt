@@ -12,14 +12,93 @@ from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 
-# --- Xóa dòng try... pypdf cũ đi và dán đoạn này vào đầu ---
+# Thư viện đọc PDF để bóc tách ảnh nét cao
 try:
     import fitz  # Tên gọi gọn của PyMuPDF
 except ImportError:
     pass
 
-# ... (Giữ nguyên các hàm process_bg_image, optimize_and_extract_info ...) ...
+# --- SỬA LỖI ĐỌC ẢNH IPHONE (HEIC) ---
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
 
+st.set_page_config(page_title="Công Cụ Chèn Ảnh PowerPoint & PDF", page_icon="⚡", layout="centered")
+
+st.markdown("""
+    <style>
+        div[data-testid="stFileUploadDropzone"] > div > small {
+            display: none !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# Khởi tạo Session State hỗ trợ nhiều Đơn vị
+if "units" not in st.session_state: st.session_state.units = [{"id": 1, "name": "Đơn vị 1"}]
+if "photo_cart" not in st.session_state: st.session_state.photo_cart = {1: {}} 
+
+if "template_bytes" not in st.session_state: st.session_state.template_bytes = None 
+if "cover_pos" not in st.session_state: st.session_state.cover_pos = "Dưới - Giữa"
+if "ty_pos" not in st.session_state: st.session_state.ty_pos = "Trung tâm"
+
+if "final_pdf" not in st.session_state: st.session_state.final_pdf = None
+if "final_pptx" not in st.session_state: st.session_state.final_pptx = None
+if "show_download_pdf" not in st.session_state: st.session_state.show_download_pdf = False
+if "show_download_pptx" not in st.session_state: st.session_state.show_download_pptx = False
+
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+def process_bg_image(uploaded_file, target_ratio=16/9):
+    if not uploaded_file: return None
+    try:
+        bg_bytes = uploaded_file.getvalue()
+        with Image.open(io.BytesIO(bg_bytes)) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode != 'RGB': img = img.convert('RGB')
+            img_ratio = img.width / img.height
+            if img_ratio > target_ratio:
+                new_w = int(img.height * target_ratio)
+                offset = (img.width - new_w) // 2
+                img = img.crop((offset, 0, offset + new_w, img.height))
+            elif img_ratio < target_ratio:
+                new_h = int(img.width / target_ratio)
+                offset = (img.height - new_h) // 2
+                img = img.crop((0, offset, img.width, offset + new_h))
+            bg_stream = io.BytesIO()
+            img.save(bg_stream, format='JPEG', quality=90)
+            return bg_stream
+    except Exception: return None
+
+def optimize_and_extract_info(img_bytes, file_name):
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as img:
+            dt_str = "9999"
+            exif = img.getexif()
+            if exif: dt_str = exif.get(36867) or exif.get(306) or "9999"
+            
+            img_t = ImageOps.exif_transpose(img)
+            if img_t.mode != 'RGB': img_t = img_t.convert('RGB')
+            
+            img_t.thumbnail((1600, 1600), Image.LANCZOS)
+            w, h = img_t.size
+            is_portrait = h >= w
+            
+            opt_stream = io.BytesIO()
+            img_t.save(opt_stream, format='JPEG', quality=85)
+            
+            return {
+                "bytes": opt_stream.getvalue(),
+                "name": file_name,
+                "timestamp": str(dt_str),
+                "w": w, "h": h, "is_portrait": is_portrait
+            }
+    except Exception: return None
+
+# --- HÀM BÓC TÁCH ẢNH TỪ PPTX VÀ PDF ---
 def extract_images_from_pptx(file_bytes, base_name):
     extracted = []
     try:
@@ -53,31 +132,6 @@ def extract_images_from_pdf(file_bytes, base_name):
                     extracted.append((ext_name, image_bytes))
     except Exception as e:
         st.error(f"Lỗi đọc PDF (Hãy chắc chắn bạn đã đổi thành PyMuPDF trong requirements.txt): {e}")
-    return extracted
-# --- HÀM BÓC TÁCH ẢNH TỪ PPTX VÀ PDF ---
-def extract_images_from_pptx(file_bytes, base_name):
-    extracted = []
-    try:
-        prs_ext = Presentation(io.BytesIO(file_bytes))
-        for s_idx, slide in enumerate(prs_ext.slides):
-            for shape_idx, shape in enumerate(slide.shapes):
-                if hasattr(shape, "image"):
-                    ext_name = f"{base_name}_slide{s_idx}_img{shape_idx}.png"
-                    extracted.append((ext_name, shape.image.blob))
-    except Exception as e:
-        st.error(f"Lỗi đọc PPTX: {e}")
-    return extracted
-
-def extract_images_from_pdf(file_bytes, base_name):
-    extracted = []
-    try:
-        reader = PdfReader(io.BytesIO(file_bytes))
-        for p_idx, page in enumerate(reader.pages):
-            for img_obj in page.images:
-                ext_name = f"{base_name}_page{p_idx}_{img_obj.name}"
-                extracted.append((ext_name, img_obj.data))
-    except Exception as e:
-        st.error(f"Lỗi đọc PDF (Hãy chắc chắn bạn đã cài thư viện pypdf): {e}")
     return extracted
 
 def add_image_exact(slide, img_stream, left, top, width, height):
@@ -627,108 +681,4 @@ if btn_pptx or btn_pdf:
                                 slide = prs.slides.add_slide(slide_layout)
                                 if use_blank and bg_content_stream:
                                     bg_content_stream.seek(0)
-                                    slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
-                                add_content_title_pptx(slide, current_title) 
-                                move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
-
-                            layout_rows = []
-                            if chunk_dict['type'] == 'portrait': layout_rows = [chunk] 
-                            else:
-                                if n == 6: layout_rows = [chunk[0:3], chunk[3:6]]
-                                elif n == 5: layout_rows = [chunk[0:3], chunk[3:5]]
-                                elif n == 4: layout_rows = [chunk[0:2], chunk[2:4]]
-                                else: layout_rows = [chunk]
-
-                            if is_pdf: draw_adaptive_grid_pdf(slide_pdf, layout_rows, CACH_LE_TRAI, CACH_LE_TREN, usable_w, usable_h, GAP)
-                            else: draw_adaptive_grid(slide, layout_rows, CACH_LE_TRAI, CACH_LE_TREN, usable_w, usable_h, GAP)
-                            
-                            if not is_pdf: vi_tri_hien_tai += 1
-
-                # ==========================
-                # TẠO TRANG KẾT THÚC
-                # ==========================
-                if use_blank and (end_title.strip() or bg_end_stream):
-                    y_ty = get_ty_y(st.session_state.ty_pos, slide_h)
-                    align_ty = get_alignment(st.session_state.ty_pos)
-
-                    if is_pdf:
-                        slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_end_stream)
-                        if end_title.strip(): draw_text_pdf(slide_pdf, end_title.upper(), Inches(0.5), y_ty, slide_w - Inches(1), Inches(1), st.session_state.ty_pos, 50, thankyou_color)
-                    else:
-                        ty_slide = prs.slides.add_slide(slide_layout)
-                        if bg_end_stream:
-                            bg_end_stream.seek(0)
-                            ty_slide.shapes.add_picture(bg_end_stream, 0, 0, width=slide_w, height=slide_h)
-                        move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
-
-                        if end_title.strip():
-                            txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), y_ty, slide_w - Inches(1), Inches(1))
-                            tf_ty = txBox_ty.text_frame; tf_ty.word_wrap = True
-                            p_ty = tf_ty.paragraphs[0]; p_ty.text = end_title.upper()
-                            p_ty.alignment = align_ty; p_ty.font.size = Pt(50); p_ty.font.bold = True
-                            p_ty.font.color.rgb = RGBColor(r_ty, g_ty, b_ty)
-
-                # ==========================
-                # ĐÁNH SỐ TRANG CHO PDF VÀ LƯU FILE
-                # ==========================
-                output_stream = io.BytesIO()
-                
-                if is_pdf:
-                    if len(pdf_slides) == 0:
-                        st.error("⚠️ Không có gì để xuất PDF! Bác cần chèn ảnh hoặc bật chế độ Tạo file mới.")
-                    else:
-                        # VẼ SỐ TRANG CHO TỪNG SLIDE TRƯỚC KHI LƯU
-                        font_size_pg = int(14 * 300 / 72)
-                        try: font_pg = ImageFont.truetype("Roboto-Medium.ttf", font_size_pg)
-                        except: font_pg = ImageFont.load_default()
-                        
-                        pw = emu_to_px(slide_w)
-                        ph = emu_to_px(slide_h)
-                        
-                        for p_idx, s_img in enumerate(pdf_slides):
-                            draw = ImageDraw.Draw(s_img)
-                            page_text = f"{p_idx + 1}"
-                            bbox = draw.textbbox((0,0), page_text, font=font_pg)
-                            tw = bbox[2] - bbox[0]
-                            th = bbox[3] - bbox[1]
-                            
-                            tx = pw - tw - 40  # Cách lề phải 40px
-                            ty = ph - th - 40  # Cách lề dưới 40px
-                            
-                            # Vẽ viền trắng lót chữ để dễ đọc trên nền màu
-                            draw.rectangle([tx - 15, ty - 10, tx + tw + 15, ty + th + 10], fill=(255, 255, 255))
-                            draw.text((tx, ty), page_text, font=font_pg, fill=(0, 0, 0)) # Chữ màu đen
-
-                        pdf_slides[0].save(output_stream, format="PDF", save_all=True, append_images=pdf_slides[1:])
-                        st.session_state.final_pdf = output_stream.getvalue()
-                        st.session_state.show_download_pdf = True
-                else:
-                    prs.save(output_stream)
-                    st.session_state.final_pptx = output_stream.getvalue()
-                    st.session_state.show_download_pptx = True
-
-            except Exception as e:
-                st.error(f"❌ Có lỗi xảy ra: {e}")
-
-# ==========================================
-# KHU VỰC HIỂN THỊ NÚT TẢI XUỐNG CỐ ĐỊNH
-# ==========================================
-if st.session_state.show_download_pptx and st.session_state.final_pptx:
-    st.success("✅ Thành công mỹ mãn! File PowerPoint đã sẵn sàng.")
-    st.download_button(
-        label="📥 BẤM VÀO ĐÂY ĐỂ TẢI POWERPOINT VỀ MÁY",
-        data=st.session_state.final_pptx,
-        file_name="Report_Kiem_Tra.pptx",
-        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        type="primary"
-    )
-
-if st.session_state.show_download_pdf and st.session_state.final_pdf:
-    st.success("✅ Thành công mỹ mãn! File PDF đã sẵn sàng.")
-    st.download_button(
-        label="📥 BẤM VÀO ĐÂY ĐỂ TẢI PDF VỀ MÁY",
-        data=st.session_state.final_pdf,
-        file_name="Report_Kiem_Tra.pdf",
-        mime="application/pdf",
-        type="primary"
-    )
+                                    slide
