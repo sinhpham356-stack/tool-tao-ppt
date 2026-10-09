@@ -2,4 +2,4 @@ streamlit
 python-pptx
 Pillow
 pillow-heif
-pypdf
+PyMuPDF
