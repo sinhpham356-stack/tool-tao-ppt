@@ -205,5 +205,687 @@ def partition_images(imgs, max_size):
     return res
 
 def emu_to_px(emu): 
-    def emu_to_px(emu): 
     return int((emu / 914400.0) * 300)
+
+def add_pdf_slide(pdf_slides, w_emu, h_emu, bg_stream=None):
+    pw = emu_to_px(w_emu)
+    ph = emu_to_px(h_emu)
+    img = Image.new('RGB', (pw, ph), (255, 255, 255))
+    if bg_stream:
+        bg_stream.seek(0)
+        bg = Image.open(bg_stream).convert('RGB')
+        bg = bg.resize((pw, ph), Image.LANCZOS)
+        img.paste(bg, (0, 0))
+    pdf_slides.append(img)
+    return img
+
+def draw_text_pdf(slide_img, text, x_emu, y_emu, w_emu, h_emu, align_pos, pt_size, color_hex, underline=False):
+    if not text: 
+        return
+    draw = ImageDraw.Draw(slide_img)
+    px = emu_to_px(x_emu)
+    py = emu_to_px(y_emu)
+    pw = emu_to_px(w_emu)
+    font_size = int(pt_size * 300 / 72) 
+    
+    font_path = "Roboto-Medium.ttf"
+    if not os.path.exists(font_path):
+        try: 
+            urllib.request.urlretrieve("https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Medium.ttf", font_path)
+        except Exception: 
+            pass
+    try: 
+        font = ImageFont.truetype(font_path, font_size)
+    except Exception: 
+        font = ImageFont.load_default()
+        
+    r, g, b = hex_to_rgb(color_hex)
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        test_line = current_line + " " + word if current_line else word
+        bbox = draw.textbbox((0,0), test_line, font=font)
+        if bbox[2] - bbox[0] <= pw: 
+            current_line = test_line
+        else:
+            if current_line: 
+                lines.append(current_line)
+            current_line = word
+    if current_line: 
+        lines.append(current_line)
+        
+    current_y = py
+    for line in lines:
+        bbox = draw.textbbox((0,0), line, font=font)
+        tw = bbox[2] - bbox[0]
+        text_bottom = bbox[3] 
+        th = text_bottom - bbox[1]
+        
+        if "Trái" in align_pos or align_pos == PP_ALIGN.LEFT: 
+            tx = px
+        elif "Phải" in align_pos or align_pos == PP_ALIGN.RIGHT: 
+            tx = px + pw - tw
+        else: 
+            tx = px + (pw - tw) / 2
+            
+        draw.text((tx, current_y), line, font=font, fill=(r,g,b))
+        if underline:
+            line_y = current_y + text_bottom + 15
+            draw.line([tx, line_y, tx + tw, line_y], fill=(r,g,b), width=6)
+        current_y += th + 40 
+
+def add_image_pdf(slide_img, img_stream, left_emu, top_emu, width_emu, height_emu):
+    img_stream.seek(0)
+    img = Image.open(img_stream).convert('RGB')
+    px = emu_to_px(left_emu)
+    py = emu_to_px(top_emu)
+    pw = emu_to_px(width_emu)
+    ph = emu_to_px(height_emu)
+    img = img.resize((pw, ph), Image.LANCZOS)
+    slide_img.paste(img, (px, py))
+    draw = ImageDraw.Draw(slide_img)
+    draw.rectangle([px, py, px+pw, py+ph], outline=(30,30,30), width=6)
+
+def draw_adaptive_grid_pdf(slide_img, layout_rows, start_x_base, start_y_base, usable_w, usable_h, GAP):
+    num_rows = len(layout_rows)
+    if num_rows == 0: 
+        return
+    H_max = (usable_h - (num_rows - 1) * GAP) / num_rows
+    H_final = H_max
+    for row in layout_rows:
+        if not row: 
+            continue
+        sum_ratios = sum(img['w'] / img['h'] for img in row)
+        H_row_max = (usable_w - (len(row) - 1) * GAP) / sum_ratios
+        if H_row_max < H_final: 
+            H_final = H_row_max
+    Total_H = num_rows * H_final + (num_rows - 1) * GAP
+    current_y = start_y_base + (usable_h - Total_H) / 2
+    for row in layout_rows:
+        if not row: 
+            continue
+        row_w = sum(H_final * (img['w'] / img['h']) for img in row) + (len(row) - 1) * GAP
+        current_x = start_x_base + (usable_w - row_w) / 2
+        for img in row:
+            img_w = H_final * (img['w'] / img['h'])
+            add_image_pdf(slide_img, img['stream'], current_x, current_y, img_w, H_final)
+            current_x += img_w + GAP
+        current_y += H_final + GAP
+
+def render_position_grid(state_key, key_prefix):
+    def set_pos(pos): 
+        st.session_state[state_key] = pos
+    current_pos = st.session_state[state_key]
+    grid_config = [
+        [("Trên - Trái", "↖️"), ("Trên - Giữa", "⬆️"), ("Trên - Phải", "↗️")],
+        [("Giữa - Trái", "⬅️"), ("Trung tâm", "⏺️"), ("Giữa - Phải", "➡️")],
+        [("Dưới - Trái", "↙️"), ("Dưới - Giữa", "⬇️"), ("Dưới - Phải", "↘️")]
+    ]
+    st.markdown(f"📍 Đang định vị: **{current_pos}**")
+    for r_idx, row in enumerate(grid_config):
+        cols = st.columns(3, gap="small")
+        for c_idx, (pos_name, icon) in enumerate(row):
+            btn_label = f"✅ {icon}" if current_pos == pos_name else icon
+            cols[c_idx].button(
+                btn_label, key=f"{key_prefix}_{r_idx}_{c_idx}", 
+                use_container_width=True, on_click=set_pos, args=(pos_name,)
+            )
+
+def get_alignment(pos_str):
+    if "Trái" in pos_str: 
+        return PP_ALIGN.LEFT
+    elif "Phải" in pos_str: 
+        return PP_ALIGN.RIGHT
+    else: 
+        return PP_ALIGN.CENTER
+
+def get_cover_y(pos_str, slide_h, is_sub=False):
+    if "Trên" in pos_str: 
+        return Inches(0.5) if not is_sub else Inches(1.5)
+    elif "Dưới" in pos_str: 
+        return slide_h - Inches(2.2) if not is_sub else slide_h - Inches(1.2)
+    else: 
+        return slide_h/2 - Inches(1.0) if not is_sub else slide_h/2 + Inches(0.2)
+
+def get_ty_y(pos_str, slide_h):
+    if "Trên" in pos_str: 
+        return Inches(0.8)
+    elif "Dưới" in pos_str: 
+        return slide_h - Inches(1.8)
+    else: 
+        return slide_h/2 - Inches(0.5)
+
+# ==========================================
+# GIAO DIỆN HIỂN THỊ
+# ==========================================
+st.title("⚡ TRỢ LÝ TẠO REPORT BẰNG HÌNH ẢNH")
+
+st.header("Bước 1: Tải lên File PowerPoint Mẫu (Không bắt buộc)")
+template_file = st.file_uploader("Chọn file .pptx (Chỉ cần up 1 lần)", type=["pptx"])
+if template_file: 
+    st.session_state.template_bytes = template_file.getvalue()
+if st.session_state.template_bytes:
+    st.success("✅ Đã lưu file PPTX mẫu vào bộ nhớ!")
+    if st.button("🗑️ Xóa file mẫu (Để tạo file trắng mới)"):
+        st.session_state.template_bytes = None
+        st.rerun()
+
+st.header("Bước 2: Phân loại Ảnh Theo Từng Đơn Vị / Hạng Mục")
+st.info("Mỗi Đơn vị sẽ được tự động gom thành 1 phần trong báo cáo. Trang đầu tiên của Đơn vị đó sẽ có tên, các trang sau tự động ẩn tên để gọn gàng.")
+
+if st.button("➕ THÊM ĐƠN VỊ / HẠNG MỤC MỚI", use_container_width=True):
+    new_id = max([u["id"] for u in st.session_state.units], default=0) + 1
+    st.session_state.units.append({"id": new_id, "name": f"Đơn vị {new_id}"})
+    st.session_state.photo_cart[new_id] = {}
+    st.rerun()
+
+# --- Hiển thị danh sách các Đơn vị ---
+total_images = 0
+for idx, unit in enumerate(st.session_state.units):
+    uid = unit["id"]
+    if uid not in st.session_state.photo_cart:
+        st.session_state.photo_cart[uid] = {}
+        
+    num_imgs = len(st.session_state.photo_cart[uid])
+    total_images += num_imgs
+    
+    with st.expander(f"📁 {unit['name']} ({num_imgs} ảnh đã tải)", expanded=True):
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            new_name = st.text_input("Tên hiển thị trên Báo Cáo:", value=unit['name'], key=f"name_{uid}")
+            st.session_state.units[idx]['name'] = new_name
+        with col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🗑️ Xóa", key=f"del_{uid}"):
+                st.session_state.units.pop(idx)
+                if uid in st.session_state.photo_cart: 
+                    del st.session_state.photo_cart[uid]
+                st.rerun()
+
+        # Cho phép nhận cả file ảnh và file pdf/pptx vào cùng 1 chỗ
+        uploaded_files = st.file_uploader(f"Thêm ảnh hoặc file PDF/PPTX cho {new_name}", accept_multiple_files=True, key=f"up_{uid}", type=['jpg', 'jpeg', 'png', 'heic', 'pdf', 'pptx'])
+        
+        if uploaded_files:
+            count_img = 0
+            count_doc = 0
+            with st.spinner("Đang hút ảnh và lục soát tài liệu..."):
+                for f in uploaded_files:
+                    fname = f.name.lower()
+                    # Nếu là file tài liệu (PDF/PPTX) -> Bóc tách ảnh
+                    if fname.endswith(('.pdf', '.pptx')):
+                        extracted_items = []
+                        if fname.endswith(".pdf"):
+                            extracted_items = extract_images_from_pdf(f.getvalue(), f.name)
+                        elif fname.endswith(".pptx"):
+                            extracted_items = extract_images_from_pptx(f.getvalue(), f.name)
+                            
+                        for ext_name, ext_bytes in extracted_items:
+                            if ext_name not in st.session_state.photo_cart[uid]:
+                                optimized_data = optimize_and_extract_info(ext_bytes, ext_name)
+                                if optimized_data:
+                                    st.session_state.photo_cart[uid][ext_name] = optimized_data
+                                    count_doc += 1
+                    # Nếu là file ảnh thường
+                    else:
+                        if f.name not in st.session_state.photo_cart[uid]:
+                            optimized_data = optimize_and_extract_info(f.getvalue(), f.name)
+                            if optimized_data:
+                                st.session_state.photo_cart[uid][f.name] = optimized_data
+                                count_img += 1
+                gc.collect() 
+            if count_img > 0 or count_doc > 0:
+                st.success(f"🎉 Đã thêm {count_img} ảnh thường và bóc tách {count_doc} ảnh từ tài liệu vào {new_name}!")
+                st.rerun()
+
+# --- Camera ---
+st.markdown("---")
+enable_camera = st.toggle("📷 Bật máy ảnh để chụp trực tiếp")
+if enable_camera:
+    unit_options = {u["name"]: u["id"] for u in st.session_state.units}
+    if unit_options:
+        selected_unit_name = st.selectbox("Chọn Đơn vị để lưu ảnh chụp:", list(unit_options.keys()))
+        selected_uid = unit_options[selected_unit_name]
+        
+        camera_photo = st.camera_input("Chụp ảnh thực tế tại hiện trường")
+        if camera_photo:
+            cam_name = f"cam_{datetime.now().strftime('%H%M%S')}.jpg"
+            if cam_name not in st.session_state.photo_cart[selected_uid]:
+                optimized_data = optimize_and_extract_info(camera_photo.getvalue(), cam_name)
+                if optimized_data:
+                    st.session_state.photo_cart[selected_uid][cam_name] = optimized_data
+                    st.success(f"📸 Đã lưu ảnh vào {selected_unit_name}!")
+    else:
+        st.warning("Hãy thêm ít nhất 1 Đơn vị trước khi chụp.")
+
+# --- BẢNG TỔNG KẾT (TOTAL) ---
+if total_images > 0:
+    st.markdown("---")
+    st.subheader("📊 TỔNG KẾT (TOTAL)")
+    
+    col_tot1, col_tot2 = st.columns(2)
+    with col_tot1:
+        st.metric(label="Tổng số Hạng mục/Đơn vị", value=len(st.session_state.units))
+    with col_tot2:
+        st.metric(label="Tổng số Ảnh đã gom", value=total_images)
+        
+    with st.expander("Bảng kê chi tiết từng phần:", expanded=True):
+        for unit in st.session_state.units:
+            uid = unit["id"]
+            count = len(st.session_state.photo_cart.get(uid, {}))
+            st.markdown(f"- **{unit['name']}**: `{count}` ảnh")
+
+    if st.button("🗑️ Xóa TOÀN BỘ ảnh để làm lại từ đầu", use_container_width=True):
+        for uid in st.session_state.photo_cart:
+            st.session_state.photo_cart[uid] = {}
+        st.rerun()
+
+st.header("Bước 3: Tùy Chỉnh Layout")
+mode = st.radio("Chọn chế độ:", ("Layout 1: Cơ bản (1-2 ảnh/trang)", "Layout 2: Tràn viền (Lưới tự động chia đều, nhiều ảnh)"))
+align_mode = "2"
+if "Layout 1" in mode:
+    align_mode = st.radio("Căn lề cho ảnh (Layout 1):", ("1 - Trái", "2 - Giữa", "3 - Phải"))
+    align_mode = align_mode[0]
+
+st.header("Bước 4: Vị trí chèn & Thiết kế")
+vitri_input = st.text_input("Chèn vào sau Slide số mấy? (Gõ 0 để chèn cuối cùng):", "0")
+
+st.markdown("---")
+use_blank = False
+main_title, sub_title, cover_color = "", "", "#FFFFFF"
+content_color = "#003366"
+end_title, thankyou_color = "THANK YOU!", "#FFFFFF"
+bg_cover_file, bg_content_file, bg_end_file = None, None, None
+
+if not st.session_state.template_bytes:
+    st.warning("⚠️ Bạn chưa tải file PowerPoint mẫu (ở Bước 1).")
+    use_blank = st.checkbox("👉 Tích vào đây để BỎ QUA và TẠO FILE MỚI TINH")
+    
+    if use_blank:
+        st.info("🎨 THIẾT KẾ CÁC TRANG CỦA FILE MỚI:")
+        
+        with st.expander("1️⃣ TRANG BÌA MỞ ĐẦU (Cover)", expanded=True):
+            bg_cover_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Mở Đầu:", type=['jpg', 'jpeg', 'png'], key="cover")
+            main_title = st.text_input("Tiêu đề chính:", placeholder="VD: BÁO CÁO NGHIỆM THU")
+            sub_title = st.text_input("Tiêu đề phụ:", placeholder="VD: Ngày 16/08/2026")
+            col_grid1, col_color1 = st.columns([2, 1])
+            with col_grid1: render_position_grid("cover_pos", "cv")
+            with col_color1: cover_color = st.color_picker("🎨 Màu chữ bìa:", "#FFFFFF", key="c_col")
+
+        with st.expander("2️⃣ TRANG NỘI DUNG (Các trang chứa ảnh)"):
+            bg_content_file = st.file_uploader("🖼️ Tải Ảnh Nền chung cho các trang giữa:", type=['jpg', 'jpeg', 'png'], key="content_bg")
+            st.info("💡 Lưu ý: Tiêu đề góc trên cùng sẽ TỰ ĐỘNG lấy theo TÊN ĐƠN VỊ. Các trang PDF xuất ra sẽ được tự động đánh số trang ở góc dưới phải.")
+            content_color = st.color_picker("🎨 Màu chữ cho Tên Đơn Vị (Góc trên trái):", "#003366", key="con_col")
+
+        with st.expander("3️⃣ TRANG KẾT THÚC (Thank You)"):
+            bg_end_file = st.file_uploader("🖼️ Tải Ảnh Nền cho Bìa Kết Thúc:", type=['jpg', 'jpeg', 'png'], key="end")
+            end_title = st.text_input("Ghi chú kết thúc (Xóa trắng ô này nếu chỉ muốn hiện nền):", value="THANK YOU!")
+            col_grid2, col_color2 = st.columns([2, 1])
+            with col_grid2: render_position_grid("ty_pos", "ty")
+            with col_color2: thankyou_color = st.color_picker("🎨 Màu chữ Kết thúc:", "#FFFFFF", key="t_col")
+
+st.markdown("---")
+# ==========================================
+# CỤM NÚT TẠO FILE
+# ==========================================
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    btn_pptx = st.button("🚀 TẠO FILE POWERPOINT", use_container_width=True, type="primary")
+with col_btn2:
+    btn_pdf = st.button("📄 TẠO FILE PDF NHANH (CÓ ĐÁNH SỐ TRANG)", use_container_width=True)
+
+if btn_pptx or btn_pdf:
+    is_pdf = btn_pdf
+    
+    st.session_state.show_download_pptx = False
+    st.session_state.show_download_pdf = False
+
+    if not st.session_state.template_bytes and not use_blank:
+        st.error("⚠️ Vui lòng tải file mẫu ở Bước 1, HOẶC tích vào ô tạo file mới nhé!")
+    elif total_images == 0:
+        st.error("⚠️ Giỏ ảnh đang trống trơn! Bác chọn thêm ảnh ở Bước 2 nhé!")
+    else:
+        with st.spinner("Đang bay tốc độ bàn thờ để xuất file..."):
+            try:
+                # 1. Đọc tỷ lệ khung hình
+                if st.session_state.template_bytes:
+                    prs = Presentation(io.BytesIO(st.session_state.template_bytes))
+                else:
+                    prs = Presentation()
+                    prs.slide_width = Inches(13.3333333)
+                    prs.slide_height = Inches(7.5)
+                
+                slide_w = prs.slide_width
+                slide_h = prs.slide_height
+                target_ratio = slide_w / slide_h
+
+                bg_cover_stream = process_bg_image(bg_cover_file, target_ratio) if use_blank else None
+                bg_content_stream = process_bg_image(bg_content_file, target_ratio) if use_blank else None
+                bg_end_stream = process_bg_image(bg_end_file, target_ratio) if use_blank else None
+                
+                r_cov, g_cov, b_cov = hex_to_rgb(cover_color)
+                r_con, g_con, b_con = hex_to_rgb(content_color)
+                r_ty, g_ty, b_ty = hex_to_rgb(thankyou_color)
+
+                if not is_pdf:
+                    tong_slide = len(prs.slides)
+                    vi_tri_hien_tai = tong_slide 
+                    if tong_slide > 0:
+                        match = re.search(r'\d+', vitri_input)
+                        if match:
+                            trang_chon = int(match.group())
+                            if 0 < trang_chon <= tong_slide: 
+                                vi_tri_hien_tai = trang_chon
+                    else: 
+                        vi_tri_hien_tai = 0
+                else:
+                    vi_tri_hien_tai = 0 # PDF luôn xuất từ đầu các ảnh nhét thêm
+
+                try: 
+                    slide_layout = prs.slide_layouts[6]
+                except Exception: 
+                    slide_layout = prs.slide_layouts[0] 
+
+                pdf_slides = [] 
+
+                # ==========================
+                # TẠO TRANG BÌA MỞ ĐẦU
+                # ==========================
+                if use_blank and (main_title or sub_title or bg_cover_stream):
+                    y_main = get_cover_y(st.session_state.cover_pos, slide_h, is_sub=False)
+                    y_sub = get_cover_y(st.session_state.cover_pos, slide_h, is_sub=True)
+                    align_cover = get_alignment(st.session_state.cover_pos)
+
+                    if is_pdf:
+                        slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_cover_stream)
+                        if main_title: 
+                            draw_text_pdf(slide_pdf, main_title.upper(), Inches(0.5), y_main, slide_w - Inches(1), Inches(1), st.session_state.cover_pos, 44, cover_color)
+                        if sub_title: 
+                            draw_text_pdf(slide_pdf, sub_title, Inches(0.5), y_sub, slide_w - Inches(1), Inches(0.8), st.session_state.cover_pos, 24, cover_color)
+                    else:
+                        title_slide = prs.slides.add_slide(slide_layout)
+                        if bg_cover_stream:
+                            bg_cover_stream.seek(0)
+                            title_slide.shapes.add_picture(bg_cover_stream, 0, 0, width=slide_w, height=slide_h)
+                        
+                        if main_title:
+                            txBox = title_slide.shapes.add_textbox(Inches(0.5), y_main, slide_w - Inches(1), Inches(1))
+                            tf = txBox.text_frame
+                            tf.word_wrap = True
+                            p = tf.paragraphs[0]
+                            p.text = main_title.upper()
+                            p.alignment = align_cover
+                            p.font.size = Pt(44)
+                            p.font.bold = True
+                            p.font.color.rgb = RGBColor(r_cov, g_cov, b_cov)
+
+                        if sub_title:
+                            txBox2 = title_slide.shapes.add_textbox(Inches(0.5), y_sub, slide_w - Inches(1), Inches(0.8))
+                            tf2 = txBox2.text_frame
+                            tf2.word_wrap = True
+                            p2 = tf2.paragraphs[0]
+                            p2.text = sub_title
+                            p2.alignment = align_cover
+                            p2.font.size = Pt(24)
+                            p2.font.color.rgb = RGBColor(r_cov, g_cov, b_cov)
+                        vi_tri_hien_tai = len(prs.slides)
+
+                CACH_LE_TREN = Inches(0.9)  
+                CACH_LE_DUOI = Inches(0.8)  
+                CACH_LE_TRAI = Inches(0.2) 
+                CACH_LE_PHAI = Inches(0.2) 
+                GAP = Inches(0.12)          
+                usable_w = slide_w - CACH_LE_TRAI - CACH_LE_PHAI
+                usable_h = slide_h - CACH_LE_TREN - CACH_LE_DUOI
+
+                def add_content_title_pptx(slide_obj, title_text):
+                    if use_blank and title_text:
+                        tx = slide_obj.shapes.add_textbox(Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6))
+                        tf_c = tx.text_frame
+                        p_c = tf_c.paragraphs[0]
+                        p_c.text = title_text.upper()
+                        p_c.font.size = Pt(22)
+                        p_c.font.bold = True
+                        p_c.font.underline = True 
+                        p_c.font.color.rgb = RGBColor(r_con, g_con, b_con)
+
+                # ==========================
+                # DÀN TRANG NỘI DUNG CHÍNH - LẶP THEO TỪNG ĐƠN VỊ
+                # ==========================
+                for unit in st.session_state.units:
+                    uid = unit["id"]
+                    unit_name = unit["name"]
+                    
+                    if uid not in st.session_state.photo_cart or not st.session_state.photo_cart[uid]:
+                        continue
+                        
+                    image_data = []
+                    for key, img_info in st.session_state.photo_cart[uid].items():
+                        image_data.append({
+                            'stream': io.BytesIO(img_info["bytes"]),
+                            'is_portrait': img_info["is_portrait"], 
+                            'w': img_info["w"], 'h': img_info["h"],
+                            'name': img_info["name"], 'timestamp': img_info["timestamp"]
+                        })
+                    image_data.sort(key=lambda x: (x['timestamp'], x['name']))
+                    
+                    is_first_slide = True
+
+                    if "Layout 1" in mode:
+                        i = 0
+                        while i < len(image_data):
+                            current_img = image_data[i]
+                            current_title = unit_name if is_first_slide else ""
+                            is_first_slide = False
+                            
+                            if is_pdf:
+                                slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_content_stream)
+                                if use_blank and current_title:
+                                    draw_text_pdf(slide_pdf, current_title.upper(), Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6), "Trái", 22, content_color, underline=True)
+                            else:
+                                slide = prs.slides.add_slide(slide_layout) 
+                                if use_blank and bg_content_stream:
+                                    bg_content_stream.seek(0)
+                                    slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
+                                add_content_title_pptx(slide, current_title) 
+                                move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
+                            
+                            if current_img['is_portrait'] and (i + 1 < len(image_data)) and image_data[i+1]['is_portrait']:
+                                next_img = image_data[i+1]
+                                r1 = current_img['w'] / current_img['h']
+                                r2 = next_img['w'] / next_img['h']
+                                test_w = usable_h * r1 + usable_h * r2
+                                if test_w <= usable_w - GAP: 
+                                    final_h = usable_h
+                                else: 
+                                    final_h = (usable_w - GAP) / (r1 + r2)
+                                    
+                                final_w1 = final_h * r1
+                                final_w2 = final_h * r2
+                                block_w = final_w1 + GAP + final_w2
+                                
+                                if align_mode == '1': 
+                                    start_x = CACH_LE_TRAI
+                                elif align_mode == '3': 
+                                    start_x = slide_w - CACH_LE_PHAI - block_w
+                                else: 
+                                    start_x = CACH_LE_TRAI + (usable_w - block_w) / 2
+                                start_y = CACH_LE_TREN + (usable_h - final_h) / 2
+                                
+                                if is_pdf:
+                                    add_image_pdf(slide_pdf, current_img['stream'], start_x, start_y, final_w1, final_h)
+                                    add_image_pdf(slide_pdf, next_img['stream'], start_x + final_w1 + GAP, start_y, final_w2, final_h)
+                                else:
+                                    add_image_exact(slide, current_img['stream'], start_x, start_y, final_w1, final_h)
+                                    add_image_exact(slide, next_img['stream'], start_x + final_w1 + GAP, start_y, final_w2, final_h)
+                                i += 2 
+                            else:
+                                r_img = current_img['w'] / current_img['h']
+                                if usable_h * r_img <= usable_w:
+                                    f_h = usable_h
+                                    f_w = usable_h * r_img
+                                else:
+                                    f_w = usable_w
+                                    f_h = usable_w / r_img
+                                    
+                                if align_mode == '1': 
+                                    s_x = CACH_LE_TRAI
+                                elif align_mode == '3': 
+                                    s_x = slide_w - CACH_LE_PHAI - f_w
+                                else: 
+                                    s_x = CACH_LE_TRAI + (usable_w - f_w) / 2
+                                s_y = CACH_LE_TREN + (usable_h - f_h) / 2
+                                
+                                if is_pdf: 
+                                    add_image_pdf(slide_pdf, current_img['stream'], s_x, s_y, f_w, f_h)
+                                else: 
+                                    add_image_exact(slide, current_img['stream'], s_x, s_y, f_w, f_h)
+                                i += 1
+                            
+                            if not is_pdf: 
+                                vi_tri_hien_tai += 1
+
+                    elif "Layout 2" in mode:
+                        landscapes = [img for img in image_data if not img['is_portrait']]
+                        portraits = [img for img in image_data if img['is_portrait']]
+                        smart_chunks = []
+                        for c in partition_images(landscapes, 6): 
+                            smart_chunks.append({'type': 'landscape', 'images': c})
+                        for c in partition_images(portraits, 4): 
+                            smart_chunks.append({'type': 'portrait', 'images': c})
+
+                        for chunk_dict in smart_chunks:
+                            chunk = chunk_dict['images']
+                            n = len(chunk)
+                            
+                            current_title = unit_name if is_first_slide else ""
+                            is_first_slide = False
+                            
+                            if is_pdf:
+                                slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_content_stream)
+                                if use_blank and current_title: 
+                                    draw_text_pdf(slide_pdf, current_title.upper(), Inches(0.2), Inches(0.15), slide_w - Inches(0.4), Inches(0.6), "Trái", 22, content_color, underline=True)
+                            else:
+                                slide = prs.slides.add_slide(slide_layout)
+                                if use_blank and bg_content_stream:
+                                    bg_content_stream.seek(0)
+                                    slide.shapes.add_picture(bg_content_stream, 0, 0, width=slide_w, height=slide_h)
+                                add_content_title_pptx(slide, current_title) 
+                                move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
+
+                            layout_rows = []
+                            if chunk_dict['type'] == 'portrait': 
+                                layout_rows = [chunk] 
+                            else:
+                                if n == 6: 
+                                    layout_rows = [chunk[0:3], chunk[3:6]]
+                                elif n == 5: 
+                                    layout_rows = [chunk[0:3], chunk[3:5]]
+                                elif n == 4: 
+                                    layout_rows = [chunk[0:2], chunk[2:4]]
+                                else: 
+                                    layout_rows = [chunk]
+
+                            if is_pdf: 
+                                draw_adaptive_grid_pdf(slide_pdf, layout_rows, CACH_LE_TRAI, CACH_LE_TREN, usable_w, usable_h, GAP)
+                            else: 
+                                draw_adaptive_grid(slide, layout_rows, CACH_LE_TRAI, CACH_LE_TREN, usable_w, usable_h, GAP)
+                            
+                            if not is_pdf: 
+                                vi_tri_hien_tai += 1
+
+                # ==========================
+                # TẠO TRANG KẾT THÚC
+                # ==========================
+                if use_blank and (end_title.strip() or bg_end_stream):
+                    y_ty = get_ty_y(st.session_state.ty_pos, slide_h)
+                    align_ty = get_alignment(st.session_state.ty_pos)
+
+                    if is_pdf:
+                        slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_end_stream)
+                        if end_title.strip(): 
+                            draw_text_pdf(slide_pdf, end_title.upper(), Inches(0.5), y_ty, slide_w - Inches(1), Inches(1), st.session_state.ty_pos, 50, thankyou_color)
+                    else:
+                        ty_slide = prs.slides.add_slide(slide_layout)
+                        if bg_end_stream:
+                            bg_end_stream.seek(0)
+                            ty_slide.shapes.add_picture(bg_end_stream, 0, 0, width=slide_w, height=slide_h)
+                        move_slide(prs, len(prs.slides) - 1, vi_tri_hien_tai)
+
+                        if end_title.strip():
+                            txBox_ty = ty_slide.shapes.add_textbox(Inches(0.5), y_ty, slide_w - Inches(1), Inches(1))
+                            tf_ty = txBox_ty.text_frame
+                            tf_ty.word_wrap = True
+                            p_ty = tf_ty.paragraphs[0]
+                            p_ty.text = end_title.upper()
+                            p_ty.alignment = align_ty
+                            p_ty.font.size = Pt(50)
+                            p_ty.font.bold = True
+                            p_ty.font.color.rgb = RGBColor(r_ty, g_ty, b_ty)
+
+                # ==========================
+                # ĐÁNH SỐ TRANG CHO PDF VÀ LƯU FILE
+                # ==========================
+                output_stream = io.BytesIO()
+                
+                if is_pdf:
+                    if len(pdf_slides) == 0:
+                        st.error("⚠️ Không có gì để xuất PDF! Bác cần chèn ảnh hoặc bật chế độ Tạo file mới.")
+                    else:
+                        # VẼ SỐ TRANG CHO TỪNG SLIDE TRƯỚC KHI LƯU
+                        font_size_pg = int(14 * 300 / 72)
+                        try: 
+                            font_pg = ImageFont.truetype("Roboto-Medium.ttf", font_size_pg)
+                        except Exception: 
+                            font_pg = ImageFont.load_default()
+                        
+                        pw = emu_to_px(slide_w)
+                        ph = emu_to_px(slide_h)
+                        
+                        for p_idx, s_img in enumerate(pdf_slides):
+                            draw = ImageDraw.Draw(s_img)
+                            page_text = f"{p_idx + 1}"
+                            bbox = draw.textbbox((0,0), page_text, font=font_pg)
+                            tw = bbox[2] - bbox[0]
+                            th = bbox[3] - bbox[1]
+                            
+                            tx = pw - tw - 40  # Cách lề phải 40px
+                            ty = ph - th - 40  # Cách lề dưới 40px
+                            
+                            # Vẽ viền trắng lót chữ để dễ đọc trên nền màu
+                            draw.rectangle([tx - 15, ty - 10, tx + tw + 15, ty + th + 10], fill=(255, 255, 255))
+                            draw.text((tx, ty), page_text, font=font_pg, fill=(0, 0, 0)) # Chữ màu đen
+
+                        pdf_slides[0].save(output_stream, format="PDF", save_all=True, append_images=pdf_slides[1:])
+                        st.session_state.final_pdf = output_stream.getvalue()
+                        st.session_state.show_download_pdf = True
+                else:
+                    prs.save(output_stream)
+                    st.session_state.final_pptx = output_stream.getvalue()
+                    st.session_state.show_download_pptx = True
+
+            except Exception as e:
+                st.error(f"❌ Có lỗi xảy ra: {e}")
+
+# ==========================================
+# KHU VỰC HIỂN THỊ NÚT TẢI XUỐNG CỐ ĐỊNH
+# ==========================================
+if st.session_state.show_download_pptx and st.session_state.final_pptx:
+    st.success("✅ Thành công mỹ mãn! File PowerPoint đã sẵn sàng.")
+    st.download_button(
+        label="📥 BẤM VÀO ĐÂY ĐỂ TẢI POWERPOINT VỀ MÁY",
+        data=st.session_state.final_pptx,
+        file_name="Report_Kiem_Tra.pptx",
+        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        type="primary"
+    )
+
+if st.session_state.show_download_pdf and st.session_state.final_pdf:
+    st.success("✅ Thành công mỹ mãn! File PDF đã sẵn sàng.")
+    st.download_button(
+        label="📥 BẤM VÀO ĐÂY ĐỂ TẢI PDF VỀ MÁY",
+        data=st.session_state.final_pdf,
+        file_name="Report_Kiem_Tra.pdf",
+        mime="application/pdf",
+        type="primary"
+    )
