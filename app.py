@@ -12,6 +12,12 @@ from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 from PIL import Image, ImageOps, ImageDraw, ImageFont
 
+# Thư viện đọc PDF để bóc tách ảnh
+try:
+    from pypdf import PdfReader
+except ImportError:
+    pass
+
 # --- SỬA LỖI ĐỌC ẢNH IPHONE (HEIC) ---
 try:
     from pillow_heif import register_heif_opener
@@ -91,6 +97,32 @@ def optimize_and_extract_info(img_bytes, file_name):
                 "w": w, "h": h, "is_portrait": is_portrait
             }
     except Exception: return None
+
+# --- HÀM BÓC TÁCH ẢNH TỪ PPTX VÀ PDF ---
+def extract_images_from_pptx(file_bytes, base_name):
+    extracted = []
+    try:
+        prs_ext = Presentation(io.BytesIO(file_bytes))
+        for s_idx, slide in enumerate(prs_ext.slides):
+            for shape_idx, shape in enumerate(slide.shapes):
+                if hasattr(shape, "image"):
+                    ext_name = f"{base_name}_slide{s_idx}_img{shape_idx}.png"
+                    extracted.append((ext_name, shape.image.blob))
+    except Exception as e:
+        st.error(f"Lỗi đọc PPTX: {e}")
+    return extracted
+
+def extract_images_from_pdf(file_bytes, base_name):
+    extracted = []
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        for p_idx, page in enumerate(reader.pages):
+            for img_obj in page.images:
+                ext_name = f"{base_name}_page{p_idx}_{img_obj.name}"
+                extracted.append((ext_name, img_obj.data))
+    except Exception as e:
+        st.error(f"Lỗi đọc PDF (Hãy chắc chắn bạn đã cài thư viện pypdf): {e}")
+    return extracted
 
 def add_image_exact(slide, img_stream, left, top, width, height):
     img_stream.seek(0)
@@ -266,7 +298,6 @@ def get_ty_y(pos_str, slide_h):
 # GIAO DIỆN HIỂN THỊ
 # ==========================================
 st.title("⚡ TRỢ LÝ TẠO REPORT BẰNG HÌNH ẢNH")
-st.error("💡 **MẸO CHO iPHONE:** Đừng chọn 90 ảnh cùng lúc web sẽ văng! Mở app Ảnh -> Lưu các ảnh vào mục **Tệp (Files)** -> Up qua Tệp sẽ mượt 100%!")
 
 st.header("Bước 1: Tải lên File PowerPoint Mẫu (Không bắt buộc)")
 template_file = st.file_uploader("Chọn file .pptx (Chỉ cần up 1 lần)", type=["pptx"])
@@ -278,7 +309,7 @@ if st.session_state.template_bytes:
         st.rerun()
 
 st.header("Bước 2: Phân loại Ảnh Theo Từng Đơn Vị / Hạng Mục")
-st.info("Mỗi Đơn vị sẽ được tự động gom thành 1 phần trong báo cáo. Trang đầu tiên của Đơn vị đó sẽ có tên Đơn vị, các trang sau tự động ẩn tên để gọn gàng.")
+st.info("Mỗi Đơn vị sẽ được tự động gom thành 1 phần trong báo cáo. Trang đầu tiên của Đơn vị đó sẽ có tên, các trang sau tự động ẩn tên để gọn gàng.")
 
 if st.button("➕ THÊM ĐƠN VỊ / HẠNG MỤC MỚI", use_container_width=True):
     new_id = max([u["id"] for u in st.session_state.units], default=0) + 1
@@ -308,7 +339,7 @@ for idx, unit in enumerate(st.session_state.units):
                 if uid in st.session_state.photo_cart: del st.session_state.photo_cart[uid]
                 st.rerun()
 
-        uploaded_images = st.file_uploader(f"Thêm ảnh cho {new_name}", accept_multiple_files=True, key=f"up_{uid}")
+        uploaded_images = st.file_uploader(f"Thêm ảnh cho {new_name}", accept_multiple_files=True, key=f"up_{uid}", type=['jpg', 'jpeg', 'png', 'heic'])
         if uploaded_images:
             count = 0
             with st.spinner("Đang hút ảnh..."):
@@ -322,6 +353,45 @@ for idx, unit in enumerate(st.session_state.units):
             if count > 0:
                 st.success(f"🎉 Đã thêm {count} ảnh vào {new_name}!")
                 st.rerun()
+
+# --- BÓC TÁCH ẢNH TỪ FILE DOC/PPTX CỦA KHÁCH HÀNG ---
+st.markdown("---")
+st.subheader("Bóc tách ảnh từ File PDF hoặc PPTX (Của bên khác gửi)")
+doc_files = st.file_uploader("Tải lên file PDF hoặc PPTX để rút toàn bộ ảnh bên trong ra:", type=['pdf', 'pptx'], accept_multiple_files=True)
+
+if doc_files:
+    unit_options = {u["name"]: u["id"] for u in st.session_state.units}
+    if unit_options:
+        col_doc1, col_doc2 = st.columns([3, 2])
+        with col_doc1:
+            selected_unit_name_doc = st.selectbox("Chọn Đơn vị để nhét ảnh bóc tách vào:", list(unit_options.keys()), key="doc_unit")
+            selected_uid_doc = unit_options[selected_unit_name_doc]
+        with col_doc2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("✂️ Bóc tách ảnh ngay", type="primary"):
+                count_doc = 0
+                with st.spinner("Đang lục soát và bóc tách ảnh từ file..."):
+                    for df in doc_files:
+                        fname = df.name.lower()
+                        extracted_items = []
+                        if fname.endswith(".pdf"):
+                            extracted_items = extract_images_from_pdf(df.getvalue(), df.name)
+                        elif fname.endswith(".pptx"):
+                            extracted_items = extract_images_from_pptx(df.getvalue(), df.name)
+                            
+                        for ext_name, ext_bytes in extracted_items:
+                            if ext_name not in st.session_state.photo_cart[selected_uid_doc]:
+                                optimized_data = optimize_and_extract_info(ext_bytes, ext_name)
+                                if optimized_data:
+                                    st.session_state.photo_cart[selected_uid_doc][ext_name] = optimized_data
+                                    count_doc += 1
+                if count_doc > 0:
+                    st.success(f"🎉 Đã bóc tách thành công {count_doc} ảnh và thêm vào {selected_unit_name_doc}!")
+                    st.rerun()
+                else:
+                    st.warning("Không tìm thấy ảnh nào trong file này!")
+    else:
+        st.warning("Hãy thêm ít nhất 1 Đơn vị trước khi bóc tách.")
 
 # --- Camera ---
 st.markdown("---")
@@ -384,7 +454,7 @@ if not st.session_state.template_bytes:
 
         with st.expander("2️⃣ TRANG NỘI DUNG (Các trang chứa ảnh)"):
             bg_content_file = st.file_uploader("🖼️ Tải Ảnh Nền chung cho các trang giữa:", type=['jpg', 'jpeg', 'png'], key="content_bg")
-            st.info("💡 Lưu ý: Tiêu đề góc trên cùng sẽ TỰ ĐỘNG lấy theo TÊN ĐƠN VỊ bạn đã đặt ở Bước 2. Trang đầu tiên của đơn vị sẽ có tên, các trang sau sẽ được làm trống.")
+            st.info("💡 Lưu ý: Tiêu đề góc trên cùng sẽ TỰ ĐỘNG lấy theo TÊN ĐƠN VỊ. Các trang PDF xuất ra sẽ được tự động đánh số trang ở góc dưới phải.")
             content_color = st.color_picker("🎨 Màu chữ cho Tên Đơn Vị (Góc trên trái):", "#003366", key="con_col")
 
         with st.expander("3️⃣ TRANG KẾT THÚC (Thank You)"):
@@ -402,7 +472,7 @@ col_btn1, col_btn2 = st.columns(2)
 with col_btn1:
     btn_pptx = st.button("🚀 TẠO FILE POWERPOINT", use_container_width=True, type="primary")
 with col_btn2:
-    btn_pdf = st.button("📄 TẠO FILE PDF NHANH", use_container_width=True)
+    btn_pdf = st.button("📄 TẠO FILE PDF NHANH (CÓ ĐÁNH SỐ TRANG)", use_container_width=True)
 
 if btn_pptx or btn_pdf:
     is_pdf = btn_pdf
@@ -415,9 +485,6 @@ if btn_pptx or btn_pdf:
     elif total_images == 0:
         st.error("⚠️ Giỏ ảnh đang trống trơn! Bác chọn thêm ảnh ở Bước 2 nhé!")
     else:
-        if is_pdf and st.session_state.template_bytes and not use_blank:
-            st.warning("⚠️ LƯU Ý KỸ: Bác đang xuất PDF từ File Mẫu .pptx. Web không có phần mềm MS PowerPoint để vẽ lại khung viền/logo của công ty bác, nên bản PDF này sẽ chỉ có ẢNH THI CÔNG trên NỀN TRẮNG.")
-
         with st.spinner("Đang bay tốc độ bàn thờ để xuất file..."):
             try:
                 # 1. Đọc tỷ lệ khung hình
@@ -513,9 +580,8 @@ if btn_pptx or btn_pdf:
                     unit_name = unit["name"]
                     
                     if uid not in st.session_state.photo_cart or not st.session_state.photo_cart[uid]:
-                        continue # Bỏ qua nếu đơn vị này không có ảnh
+                        continue
                         
-                    # Lọc và sắp xếp ảnh của đơn vị này
                     image_data = []
                     for key, img_info in st.session_state.photo_cart[uid].items():
                         image_data.append({
@@ -526,15 +592,14 @@ if btn_pptx or btn_pdf:
                         })
                     image_data.sort(key=lambda x: (x['timestamp'], x['name']))
                     
-                    is_first_slide = True # Đánh dấu trang đầu tiên của mỗi Đơn vị
+                    is_first_slide = True
 
                     if "Layout 1" in mode:
                         i = 0
                         while i < len(image_data):
                             current_img = image_data[i]
-                            
                             current_title = unit_name if is_first_slide else ""
-                            is_first_slide = False # Sang trang sau thì tắt title
+                            is_first_slide = False
                             
                             if is_pdf:
                                 slide_pdf = add_pdf_slide(pdf_slides, slide_w, slide_h, bg_content_stream)
@@ -651,12 +716,37 @@ if btn_pptx or btn_pdf:
                             p_ty.alignment = align_ty; p_ty.font.size = Pt(50); p_ty.font.bold = True
                             p_ty.font.color.rgb = RGBColor(r_ty, g_ty, b_ty)
 
+                # ==========================
+                # ĐÁNH SỐ TRANG CHO PDF VÀ LƯU FILE
+                # ==========================
                 output_stream = io.BytesIO()
                 
                 if is_pdf:
                     if len(pdf_slides) == 0:
                         st.error("⚠️ Không có gì để xuất PDF! Bác cần chèn ảnh hoặc bật chế độ Tạo file mới.")
                     else:
+                        # VẼ SỐ TRANG CHO TỪNG SLIDE TRƯỚC KHI LƯU
+                        font_size_pg = int(14 * 300 / 72)
+                        try: font_pg = ImageFont.truetype("Roboto-Medium.ttf", font_size_pg)
+                        except: font_pg = ImageFont.load_default()
+                        
+                        pw = emu_to_px(slide_w)
+                        ph = emu_to_px(slide_h)
+                        
+                        for p_idx, s_img in enumerate(pdf_slides):
+                            draw = ImageDraw.Draw(s_img)
+                            page_text = f"{p_idx + 1}"
+                            bbox = draw.textbbox((0,0), page_text, font=font_pg)
+                            tw = bbox[2] - bbox[0]
+                            th = bbox[3] - bbox[1]
+                            
+                            tx = pw - tw - 40  # Cách lề phải 40px
+                            ty = ph - th - 40  # Cách lề dưới 40px
+                            
+                            # Vẽ viền trắng lót chữ để dễ đọc trên nền màu
+                            draw.rectangle([tx - 15, ty - 10, tx + tw + 15, ty + th + 10], fill=(255, 255, 255))
+                            draw.text((tx, ty), page_text, font=font_pg, fill=(0, 0, 0)) # Chữ màu đen
+
                         pdf_slides[0].save(output_stream, format="PDF", save_all=True, append_images=pdf_slides[1:])
                         st.session_state.final_pdf = output_stream.getvalue()
                         st.session_state.show_download_pdf = True
